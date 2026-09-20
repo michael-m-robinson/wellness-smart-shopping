@@ -590,5 +590,78 @@ class TestListMessage(unittest.TestCase):
         self.assertIn('id="f-msgpick"', html_out)
 
 
+class TestDesktopAppSource(unittest.TestCase):
+    """The Swift app no longer scrapes stores. These guard the removal, since
+    the coupon engine is what made the old button misleading."""
+
+    @classmethod
+    def setUpClass(cls):
+        root = os.path.dirname(os.path.abspath(__file__))
+        cls.path = os.path.join(root, "app", "main.swift")
+        cls.src = ""
+        if os.path.isfile(cls.path):
+            with open(cls.path, encoding="utf-8") as fh:
+                cls.src = fh.read()
+
+    def setUp(self):
+        if not self.src:
+            self.skipTest("app/main.swift not present")
+
+    def test_no_scraping_machinery_remains(self):
+        for gone in ("localCouponSources", "WebScanWindowController",
+                     "refreshOfficialOffers", "findOfficialCoupons",
+                     "checkShopRiteWebSales", "openConnectSession",
+                     "costcoOfficialCoupons", "genericOfficialCoupons",
+                     "webSalePrices", "importCopiedCoupons"):
+            self.assertNotIn(gone, self.src, gone)
+
+    def test_no_store_urls_are_fetched(self):
+        for url in ("livingrichwithcoupons", "warehouse-savings",
+                    "stews-flyer", "bjs.com/deals", "rsid/"):
+            self.assertNotIn(url, self.src, url)
+
+    def test_no_personal_data(self):
+        """Matched structurally so this file need not carry anyone's address.
+
+        The original build hard-coded a town and store branch per retailer,
+        e.g. "Somewhere - 106 Example Rd" and "Somewhere - store 141".
+        """
+        import re as _re
+        patterns = [
+            _re.compile(r'"[A-Z][A-Za-z.\' -]{2,30} - \d{1,6} [A-Za-z.\' -]{2,28}'
+                        r'(?:Rd|Road|St|Street|Ave|Avenue|Blvd|Hwy|Pike|Way|Ln|Dr)"'),
+            _re.compile(r'"[A-Z][A-Za-z.\' -]{2,30} - store \d{1,6}"'),
+            _re.compile(r'rsid/\d+'),
+        ]
+        for pattern in patterns:
+            found = pattern.search(self.src)
+            self.assertIsNone(found, found.group(0) if found else "")
+
+    def test_closing_image_is_generically_named(self):
+        """The bundled picture used to carry a person's name."""
+        self.assertIn('forResource: name', self.src)
+        self.assertIn('["theme"]', self.src)
+
+    def test_button_reads_scan_with_claude(self):
+        self.assertIn('NSButton(title: "Scan with Claude..."', self.src)
+        self.assertNotIn("Find & Apply Coupons", self.src)
+        self.assertNotIn('"Coupons (', self.src)
+
+    def test_xml_import_survives(self):
+        """The import is the whole point of the pipeline; it must not be lost."""
+        for kept in ("func parseSalesXML", "func importSalesXML",
+                     "applyDetectedCoupons", "Import Sales XML"):
+            self.assertIn(kept, self.src, kept)
+
+    def test_control_panel_handoff_exists(self):
+        self.assertIn("func openControlPanel", self.src)
+        self.assertIn("127.0.0.1:8765", self.src)
+
+    def test_build_script_is_executable(self):
+        build = os.path.join(os.path.dirname(self.path), "build.sh")
+        self.assertTrue(os.path.isfile(build))
+        self.assertTrue(os.access(build, os.X_OK))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

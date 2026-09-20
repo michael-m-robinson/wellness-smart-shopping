@@ -243,52 +243,45 @@ certainty.
 **How to Scan** (inside the wizard) has the same directions in longhand if you
 would rather read them first.
 
-### Retiring the app's old coupon panel
+### The desktop app
 
-The bundled desktop app carries a built-in coupon finder that predates this
-project. It is retired: scanning replaces it, handles more stores, honours
-purchase limits, and writes a file the app imports directly.
-
-The app is a compiled binary with no source, so the button cannot be deleted --
-deleting it means changing code, and there is no code to change. Two things can
-be done from outside it:
+The app's Swift source is in `app/`, so it builds from source:
 
 ```bash
-python3 tools/retire_app_buttons.py --app "/Applications/Your App.app" --dry-run
-python3 tools/retire_app_buttons.py --app "/Applications/Your App.app"
+cd app
+./build.sh                      # -> build/Wellness Smart Shopping.app
+./build.sh "My Shopping App"    # or under your own name
 ```
 
-**It relabels.** "Find & Apply Coupons..." becomes "Scan with Claude...", and the
-panel behind it points at the control panel. This is a byte-for-byte,
-same-length edit of string data only -- Swift stores a literal's length as an
-instruction immediate, so a replacement of identical length cannot shift the
-binary's layout.
+Needs the Swift toolchain from the Xcode command line tools
+(`xcode-select --install`). macOS only. The build names the bundle, sets its
+identifier, copies in the theme you picked in the control panel, and ad-hoc
+signs it so macOS will open it.
 
-**It neuters.** Relabelling alone is not enough: the coupon engine is live code,
-so a button reading "Scan with Claude" still fetched and scraped store pages
-behind your back. Its scrape targets are repointed at `about:blank`, which makes
-the retired feature genuinely inert instead of misleadingly alive. Pass
-`--keep-scraper` to relabel without this.
+**The coupon finder is gone.** Not relabelled -- deleted. The old build shipped
+its own scraper: it fetched store pages, parsed them, and kept sign-in sessions
+in an embedded browser. That is ~380 lines lighter now, and with it went the
+hard-coded town and store branch the original was built around.
 
-**It scrubs personal data.** The original build hard-coded one household's town
-and store branch in its store picker. Those are matched structurally and
-replaced with neutral labels, so nobody is handed a stranger's neighbourhood.
+In its place the app has one button, **Scan with Claude...**, which opens the
+deals panel. From there you can **Open Control Panel** (it checks whether the
+panel is running and tells you how to start it if not) and **Import Sales
+XML...** to apply the file a scan produced. Scanning itself happens in the
+control panel, where the Claude for Chrome extension lives.
 
-A timestamped backup is taken outside the bundle, the bundle is re-signed so
-macOS still opens it, and the whole thing undoes itself:
+What survived untouched: the meal planner, recipes, PDF export, nutrition
+targets, and the XML import. The app's own self-test still passes:
 
 ```bash
-python3 tools/retire_app_buttons.py --app "..." --restore "<the .bak file>"
+"build/Wellness Smart Shopping.app/Contents/MacOS/SmartShoppingList" \
+    --self-test /tmp/a.pdf /tmp/b.pdf /tmp/c.pdf
 ```
 
-> **The scan flow lives in the control panel, not in the app.** The app's own
-> window is the retired thing: it can import the XML, but it cannot scan. Run
-> `python3 panel.py` (or double-click **Start Panel.command**) and press **Scan
-> with Claude** there.
+Tests in `test_crawler.py` guard the removal, so the scraper cannot creep back.
 
-> **If the button still shows a count** -- "Coupons (3)..." -- that title is
-> built at runtime and cannot be patched. Clear the saved coupon values in the
-> app and it falls back to the label above. macOS only.
+> **Only have the binary?** `tools/retire_app_buttons.py` relabels and neuters a
+> compiled bundle in place, for anyone without the source. Building from `app/`
+> is better in every way and is the supported path.
 
 ### Make it sound like you
 
@@ -467,7 +460,8 @@ shared, so any store benefits from them.
 
 ## The companion desktop app
 
-The XML format is documented in **[docs/XML-IMPORT.md](docs/XML-IMPORT.md)**,
+The app's source is in `app/` and builds with `app/build.sh`. The XML format is
+documented in **[docs/XML-IMPORT.md](docs/XML-IMPORT.md)**,
 including the full list of catalog item IDs the importer accepts. The format is
 plain text and deliberately simple, so you can generate it from a spreadsheet,
 a script, or by hand — this crawler is just one producer.
