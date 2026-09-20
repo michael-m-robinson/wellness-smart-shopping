@@ -1,18 +1,44 @@
-# Store Deal Crawler
+<h1>Wellness Smart Shopping</h1>
+
+[![Version](https://img.shields.io/badge/version-1.0.0-3f7d4f)](https://github.com/michael-m-robinson/wellness-smart-shopping/releases)
+[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-555)](#what-you-need)
+[![Desktop app](https://img.shields.io/badge/desktop%20app-macOS%2013%2B-000)](#the-companion-desktop-app)
+[![Python](https://img.shields.io/badge/python-3.9%2B-3776ab)](#what-you-need)
+[![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
+[![Mobile](https://img.shields.io/badge/mobile-coming%20soon-orange)](#whats-next)
 
 **Turn this week's grocery sales into a shopping list that still hits your
 nutrition targets.**
 
-Store Deal Crawler reads the weekly deals, digital coupons and instant savings
+Wellness Smart Shopping reads the weekly deals, digital coupons and instant savings
 from your grocery stores, matches them to the staples on your list, and writes
 a small XML file. You import that file into the
-[Smart Shopping List](#the-companion-app) desktop app and it re-prices your
+[companion desktop app](#the-companion-desktop-app) and it re-prices your
 list, re-ranks your recipes, and tells you what the trip should actually cost.
 
 > **Free and open source.** Bring your own stores and your own accounts.
 > Nothing here is tied to one household, one store or one region.
 
 > 📱 **A mobile version is coming soon.**
+
+---
+
+## Where this came from
+
+This started as a personal app. One household, one set of stores, one weekly
+meal plan, built to answer a question that kept coming up: *what should we
+actually buy this week so we eat well without overspending?*
+
+It worked. And the more it worked, the more it seemed selfish to keep it on one
+laptop. Plenty of people find the weekly shop genuinely hard -- not because they
+do not know what good food looks like, but because planning it, pricing it and
+timing it around what happens to be on sale is a real chore every single week.
+That is the part a computer should be doing.
+
+So it has been generalised and given away. Nothing is tied to one family, one
+region or one set of stores any more: you bring your own stores, your own
+accounts, your own wording and your own look. If it helps you get the right
+food into the house each week with less effort, that is the whole point.
 
 ---
 
@@ -78,11 +104,84 @@ with no browser and no subscription involved.
 
 ---
 
+## The control panel
+
+The easiest way to use this. One command:
+
+```bash
+python3 panel.py
+```
+
+It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
+nothing uploaded anywhere -- with:
+
+- **Refresh Deals** -- checks every enabled store and writes the XML.
+- **How to Import** -- step-by-step import instructions in a popup.
+- **A sign-in panel** -- any store that needs an account is listed with a link
+  to open it and instructions for the browser harvest.
+- **A look picker** -- six bundled images, or drop your own into `themes/`.
+- **Wording** -- edit the app name, greeting, tagline and headings, and they
+  save straight to `branding.json`.
+
+<p align="center"><img src="docs/img/control-panel.jpg" alt="The control panel: banner with a custom greeting, Refresh Deals and How to Import buttons, matched deals, and a theme picker" width="820"></p>
+
+<p align="center"><em>Refresh, see what matched, import. That's the loop.</em></p>
+
+### Make it sound like you
+
+Every greeting and heading is data, not code. Copy the example and edit:
+
+```bash
+cp branding.example.json branding.json
+```
+
+```json
+{
+  "app_name": "Wellness Smart Shopping",
+  "greeting_morning": "Good morning - let's shop well",
+  "greeting_evening": "Good evening - let's plan the week",
+  "tagline": "Eat well on what's actually on sale this week",
+  "deals_header": "This week's deals, matched to your list",
+  "theme": "farm-market"
+}
+```
+
+Anything you leave out falls back to a sensible default, so a two-line
+`branding.json` is perfectly valid. You can also edit the common fields straight
+from the control panel and hit Save.
+
+### Choosing a look
+
+Six images ship with the project: `fresh-greens`, `farm-market`, `citrus`,
+`berry`, `harvest`, `ocean-calm`.
+
+They are **drawn by code, not downloaded** (`tools/make_themes.py`), so they
+carry no third-party licence and you can redistribute them freely with the rest
+of the project. Want a photo instead? Drop any `.png` or `.jpg` into `themes/`
+and it appears in the picker. Good sources for genuinely free photography are
+Unsplash, Pexels, Openverse and Wikimedia Commons -- check each image's licence
+before you redistribute it.
+
+### Renaming and re-skinning the desktop app
+
+The desktop app's text is compiled in, but its name and its picture are not:
+
+```bash
+python3 personalize.py --list
+python3 personalize.py --name "Wellness Smart Shopping" --theme farm-market --icon
+```
+
+This renames the bundle, swaps the picture the app displays, optionally rebuilds
+the icon, takes a timestamped backup first, and re-signs the bundle so macOS
+still opens it. macOS only.
+
+---
+
 ## Install
 
 ```bash
-git clone https://github.com/michael-m-robinson/store-deal-crawler.git
-cd store-deal-crawler
+git clone https://github.com/michael-m-robinson/wellness-smart-shopping.git
+cd wellness-smart-shopping
 cp config.example.json config.json
 ```
 
@@ -189,7 +288,7 @@ If a store blocks scripts, you do not need a parser at all — point people at
 
 ---
 
-## The companion app
+## The companion desktop app
 
 The XML format is documented in **[docs/XML-IMPORT.md](docs/XML-IMPORT.md)**,
 including the full list of catalog item IDs the importer accepts. The format is
@@ -198,13 +297,24 @@ a script, or by hand — this crawler is just one producer.
 
 ---
 
+## What's next
+
+- 📱 **A mobile version is coming soon** -- the control panel is already a web
+  app, which is the groundwork for it.
+- More store sources. Contributions welcome: a store is usually one small
+  parser and a URL.
+
+---
+
 ## Privacy
 
-- The crawler runs entirely on your machine.
+- The crawler and the control panel run entirely on your machine.
+- The panel binds to `127.0.0.1` only -- it is not reachable from
+  your network.
 - **It never sees, asks for, or stores your store passwords.** Sign-in happens
   in your own browser; only the visible text of a page you already opened is
   ever read.
-- `config.json`, `cache/` and `out/` are git-ignored so your store numbers and
+- `config.json`, `branding.json`, `cache/` and `out/` are git-ignored so your store numbers and
   local data stay off GitHub.
 
 ---

@@ -1,0 +1,31 @@
+{
+  "_comment": "Copy to branding.json and change anything. Every string here is yours to edit.",
+  "app_name": "Wellness Smart Shopping",
+  "tagline": "Eat well on what's actually on sale this week",
+  "greeting": "Let's shop well this week",
+  "greeting_morning": "Good morning - let's shop well",
+  "greeting_afternoon": "Good afternoon - let's shop well",
+  "greeting_evening": "Good evening - let's plan the week",
+  "use_time_greeting": true,
+  "deals_header": "This week's deals, matched to your list",
+  "deals_empty": "No deals matched your staples yet. Try Refresh Deals.",
+  "signin_header": "These stores need you signed in",
+  "signin_body": "Grocers show their coupons only to a signed-in session. Open the store, sign in, then refresh.",
+  "themes_header": "Choose a look",
+  "output_header": "Files ready to import",
+  "refresh_button": "Refresh Deals",
+  "refresh_working": "Checking stores...",
+  "import_button": "How to Import",
+  "save_button": "Save",
+  "import_title": "Importing into your shopping app",
+  "import_steps": [
+    "Open the Wellness Smart Shopping desktop app.",
+    "Choose Import Sales XML... from the menu.",
+    "Pick the newest file from the out/ folder listed below.",
+    "The app re-prices your list and re-ranks recipes around the deals.",
+    "Clip any store-account coupons in your store account - the file tells the app what a deal is worth, it cannot clip it for you."
+  ],
+  "import_note": "Advertised prices change. Always check your receipt.",
+  "footer": "Free and open source. Bring your own stores and accounts.",
+  "theme": "farm-market"
+}

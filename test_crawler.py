@@ -143,5 +143,46 @@ class TestXML(unittest.TestCase):
         self.assertNotIn("<offer", xml)
 
 
+
+
+class TestBranding(unittest.TestCase):
+    """Greetings, headers and imagery must all be overridable, not hard-coded."""
+
+    def test_every_default_is_overridable(self):
+        from dealcrawler import branding
+        brand = branding.load()
+        for key in branding.DEFAULTS:
+            self.assertIn(key, brand)
+
+    def test_greeting_follows_time_of_day(self):
+        from dealcrawler import branding
+        brand = dict(branding.DEFAULTS)
+        self.assertEqual(branding.greeting(brand, 9), brand["greeting_morning"])
+        self.assertEqual(branding.greeting(brand, 14), brand["greeting_afternoon"])
+        self.assertEqual(branding.greeting(brand, 20), brand["greeting_evening"])
+
+    def test_fixed_greeting_wins_when_time_greeting_is_off(self):
+        from dealcrawler import branding
+        brand = dict(branding.DEFAULTS, use_time_greeting=False, greeting="Hi there")
+        self.assertEqual(branding.greeting(brand, 9), "Hi there")
+
+    def test_themes_are_bundled(self):
+        from dealcrawler import branding
+        names = {t["name"] for t in branding.themes()}
+        self.assertTrue({"fresh-greens", "farm-market", "citrus"} <= names)
+
+
+class TestPanel(unittest.TestCase):
+    def test_page_renders_controls(self):
+        import panel
+        html_out = panel.page()
+        for needle in ('id="refresh"', 'id="howto"', "<dialog", 'class="theme'):
+            self.assertIn(needle, html_out)
+
+    def test_page_is_ascii_safe(self):
+        import panel
+        self.assertTrue(all(ord(c) < 128 for c in panel.page()))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

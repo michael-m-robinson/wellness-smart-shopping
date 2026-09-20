@@ -1,5 +1,6 @@
 # Local configuration: contains your own store numbers
 config.json
+branding.json
 
 # Fetched store pages and generated output
 cache/
