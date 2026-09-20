@@ -1765,6 +1765,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let favoritesLabel = NSTextField(labelWithString: "0 saved")
     /// Where the control panel listens. Override with `defaults write
     /// <bundle-id> controlPanelURL http://127.0.0.1:9000` if you moved it.
+    /// Where your config, scans and sales files live once installed.
+    static var dataDirectory: URL {
+        let base = FileManager.default.urls(for: .applicationSupportDirectory,
+                                            in: .userDomainMask).first
+            ?? URL(fileURLWithPath: NSHomeDirectory())
+                .appendingPathComponent("Library/Application Support")
+        let dir = base.appendingPathComponent("Wellness Smart Shopping")
+        try? FileManager.default.createDirectory(at: dir,
+                                                 withIntermediateDirectories: true)
+        return dir
+    }
+
     static var controlPanelURL: String {
         UserDefaults.standard.string(forKey: "controlPanelURL") ?? "http://127.0.0.1:8765"
     }
@@ -2198,6 +2210,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     /// beside the app, then the usual places a download or clone ends up.
     private func locateControlPanel() -> URL? {
         var candidates: [URL] = []
+        // Shipped inside the app: a drag-to-Applications install needs no
+        // folder anywhere else.
+        candidates.append(Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Resources/panel"))
         if let saved = UserDefaults.standard.string(forKey: "controlPanelDirectory") {
             candidates.append(URL(fileURLWithPath: saved))
         }
@@ -2277,6 +2293,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
         process.arguments = ["python3", script.path, "--no-open"]
         process.currentDirectoryURL = script.deletingLastPathComponent()
+        // The bundle is read-only and signed, so your files live in
+        // Application Support. panel.py honours WSS_DATA_DIR.
+        var environment = ProcessInfo.processInfo.environment
+        environment["WSS_DATA_DIR"] = AppDelegate.dataDirectory.path
+        environment["PYTHONDONTWRITEBYTECODE"] = "1"
+        process.environment = environment
         process.standardOutput = FileHandle.nullDevice
         process.standardError = FileHandle.nullDevice
         do {

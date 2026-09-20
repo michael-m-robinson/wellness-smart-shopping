@@ -277,13 +277,12 @@ panel that does three things and nothing else:
 The per-item list of entry boxes is gone -- deals arrive from a scan, so there
 was nothing left to type into it.
 
-> **Keep the app next to the project folder, and keep Python 3 installed.**
-> **Start Control Panel** runs `panel.py` for you, so it has to be able to find
-> it. It looks in a folder you picked before, then beside the app, then the
-> usual download and clone locations. **If you move the app somewhere unrelated
-> it will ask you to point at the folder once**, and remember your answer after
-> that. **Without Python 3 the button cannot start anything** -- the rest of the
-> app still works, and you can always import a sales file by hand.
+> **The app carries its own copy of the control panel**, so an app installed
+> from the disk image works wherever you put it. It falls back to a folder you
+> picked before, then the usual clone locations, and asks once if it cannot find
+> any. **Python 3 is the one thing it needs** -- macOS ships it -- and without it
+> the button cannot start anything, though the rest of the app still works and
+> you can import a sales file by hand.
 
 What survived untouched: the meal planner, recipes, PDF export, nutrition
 targets, and the XML import. The app's own self-test still passes:
@@ -373,10 +372,28 @@ icon, backs up first, and re-signs so macOS still opens it. macOS only.
 
 ## Install
 
+**The easy way — a disk image, drag to Applications.**
+
+```bash
+cd app && ./make_dmg.sh        # -> app/dist/Wellness Smart Shopping.dmg
+```
+
+Open the image, drag the app onto the Applications folder beside it, done. The
+app is **self-contained**: the control panel ships inside it, so there is no
+folder to keep next to it and nothing to install separately. Press **Scan with
+Claude…** and it starts its own panel. Your settings, scans and sales files live
+in `~/Library/Application Support/Wellness Smart Shopping/`, never inside the
+app, which is read-only and signed.
+
+To uninstall: drag the app to the Trash and delete that folder.
+
+**Or from a clone**, if you want the crawler and the panel on the command line:
+
 ```bash
 git clone https://github.com/michael-m-robinson/wellness-smart-shopping.git
 cd wellness-smart-shopping
 ./install.command          # or: python3 installer.py
+python3 installer.py --uninstall   # removes the app, settings and caches
 ```
 
 The setup wizard checks what your machine already has, offers to fix what is

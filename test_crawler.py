@@ -833,5 +833,58 @@ class TestInstaller(unittest.TestCase):
         self.assertTrue(os.access(path, os.X_OK))
 
 
+class TestBundledLayout(unittest.TestCase):
+    """Installed, the app is read-only and signed, so nothing may be written
+    inside it."""
+
+    def test_data_dir_is_separate_when_bundled(self):
+        from dealcrawler import paths
+        self.assertTrue(paths.enclosing_app_bundle("/x/Some App.app/Contents/Resources/panel"))
+        self.assertIsNone(paths.enclosing_app_bundle("/Users/me/project/panel"))
+
+    def test_data_dir_honours_an_override(self):
+        import importlib, os as _os
+        from dealcrawler import paths
+        original = _os.environ.get("WSS_DATA_DIR")
+        _os.environ["WSS_DATA_DIR"] = "/tmp/wss-test-data"
+        try:
+            reloaded = importlib.reload(paths)
+            self.assertEqual(reloaded.DATA_DIR, "/tmp/wss-test-data")
+        finally:
+            if original is None:
+                _os.environ.pop("WSS_DATA_DIR", None)
+            else:
+                _os.environ["WSS_DATA_DIR"] = original
+            importlib.reload(paths)
+
+    def test_writable_files_come_from_the_data_dir(self):
+        from dealcrawler import branding, profile, stores, paths
+        for path in (branding.USER_FILE, profile.PROFILE_FILE, stores.HARVEST_DIR):
+            self.assertTrue(path.startswith(paths.DATA_DIR), path)
+
+    def test_shipped_files_come_from_the_source_dir(self):
+        from dealcrawler import branding, paths
+        for path in (branding.THEME_DIR, branding.EXAMPLE_FILE):
+            self.assertTrue(path.startswith(paths.SOURCE_DIR), path)
+
+    def test_build_ships_the_panel_and_excludes_personal_files(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "app", "build.sh"), encoding="utf-8") as fh:
+            build = fh.read()
+        self.assertIn("Contents/Resources/panel", build)
+        for excluded in ("config.json", "branding.json", "profile.json",
+                         "harvest", "out", "__pycache__"):
+            self.assertIn(excluded, build)
+
+    def test_dmg_script_makes_a_drag_target(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        path = os.path.join(root, "app", "make_dmg.sh")
+        self.assertTrue(os.access(path, os.X_OK))
+        with open(path, encoding="utf-8") as fh:
+            dmg = fh.read()
+        self.assertIn("ln -s /Applications", dmg)
+        self.assertIn("hdiutil create", dmg)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

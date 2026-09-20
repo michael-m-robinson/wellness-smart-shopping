@@ -26,19 +26,19 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from dealcrawler import (branding, offers as offers_mod, profile as profile_mod,
+from dealcrawler import (branding, offers as offers_mod, paths, profile as profile_mod,
                          stores as stores_mod, xmlout)
 from dealcrawler.sources import harvest
 
-OUT_DIR = os.path.join(HERE, "out")
+OUT_DIR = paths.data("out")
+paths.ensure_data_dir()
 
 _state = {"running": False, "last": None}
 _lock = threading.Lock()
 
 
 def load_config() -> dict:
-    for name in ("config.json", "config.example.json"):
-        path = os.path.join(HERE, name)
+    for path in (paths.data("config.json"), paths.source("config.example.json")):
         if os.path.exists(path):
             try:
                 with open(path) as fh:
@@ -930,10 +930,15 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, page())
         if path.startswith("/themes/"):
             rel = path[len("/themes/"):]
-            # Keep the request inside themes/ regardless of what was asked for.
-            full = os.path.normpath(os.path.join(branding.THEME_DIR, rel))
-            if (full.startswith(os.path.realpath(branding.THEME_DIR))
-                    or full.startswith(branding.THEME_DIR)) and os.path.isfile(full):
+            # Look in your folder first, then the shipped one; and keep the
+            # request inside whichever it resolves to.
+            full = ""
+            for folder in (branding.USER_THEME_DIR, branding.THEME_DIR):
+                candidate = os.path.normpath(os.path.join(folder, rel))
+                if candidate.startswith(os.path.normpath(folder)) and os.path.isfile(candidate):
+                    full = candidate
+                    break
+            if full:
                 ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
                 with open(full, "rb") as fh:
                     return self._send(200, fh.read(), ctype)

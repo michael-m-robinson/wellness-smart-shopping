@@ -286,6 +286,128 @@ def step_one_copy(step, total):
     return True
 
 
+# ------------------------------------------------------------------ uninstall
+# Everywhere macOS squirrels away per-app state. A bundle deleted from Finder
+# leaves all of this behind, which is why an app you "removed" can come back
+# with its old settings intact.
+SUPPORT_DIRS = [
+    "~/Library/Preferences/{ident}.plist",
+    "~/Library/Caches/{ident}",
+    "~/Library/HTTPStorages/{ident}",
+    "~/Library/HTTPStorages/{ident}.binarycookies",
+    "~/Library/WebKit/{ident}",
+    "~/Library/Saved Application State/{ident}.savedState",
+    "~/Library/Application Support/{ident}",
+]
+
+PROJECT_DATA = ["config.json", "branding.json", "profile.json"]
+PROJECT_DIRS = ["harvest", "out"]
+
+
+def support_paths(identifier):
+    """Existing per-app files for one bundle identifier."""
+    found = []
+    for pattern in SUPPORT_DIRS:
+        path = os.path.expanduser(pattern.format(ident=identifier))
+        if os.path.exists(path):
+            found.append(path)
+        # Temp cookie files pick up a suffix.
+        parent, base = os.path.dirname(path), os.path.basename(path)
+        if os.path.isdir(parent) and base.endswith(".binarycookies"):
+            for name in os.listdir(parent):
+                if name.startswith(base + "_tmp"):
+                    found.append(os.path.join(parent, name))
+    return found
+
+
+def remove_path(path):
+    if os.path.isdir(path) and not os.path.islink(path):
+        shutil.rmtree(path, ignore_errors=True)
+    else:
+        try:
+            os.remove(path)
+        except OSError:
+            return False
+    return True
+
+
+def uninstall():
+    print()
+    print(BOLD("  Wellness Smart Shopping - uninstall"))
+    print()
+
+    copies = find_installed_copies()
+    ours = [(p, i) for p, i, mine in copies if mine]
+    legacy = [(p, i) for p, i, mine in copies if not mine]
+
+    if ours:
+        print("    These copies of the app will be removed:")
+        for path, _ in ours:
+            report(WARN, "app", path)
+    else:
+        report(OK, "app", "none installed")
+
+    identifiers = sorted({i for _, i in ours} |
+                         {i for _, i in legacy} |
+                         {OUR_IDENTIFIER_PREFIX + "wellnesssmartshopping"})
+    leftovers = []
+    for ident in identifiers:
+        leftovers.extend(support_paths(ident))
+    # Orphaned settings from an app already deleted count too.
+    for ident in LEGACY_IDENTIFIERS:
+        leftovers.extend(support_paths(ident))
+    leftovers = sorted(set(leftovers))
+    if leftovers:
+        print()
+        print("    Along with its settings and caches:")
+        for path in leftovers:
+            report(WARN, "leftover", path.replace(os.path.expanduser("~"), "~"))
+
+    if not ours and not leftovers:
+        print()
+        print(GREEN("    Nothing to uninstall."))
+        return 0
+
+    print()
+    if not ask("Remove all of that?", default=True):
+        print(YELLOW("    Cancelled. Nothing was changed."))
+        return 1
+
+    for path, _ in ours:
+        unregister(path)
+        remove_path(path)
+        report(OK, "removed", path)
+    for path in leftovers:
+        remove_path(path)
+    if leftovers:
+        report(OK, "removed", f"{len(leftovers)} settings and cache item(s)")
+
+    # The shopping data is the user's, and is not part of the app.
+    data = [os.path.join(HERE, f) for f in PROJECT_DATA
+            if os.path.exists(os.path.join(HERE, f))]
+    data += [os.path.join(HERE, d) for d in PROJECT_DIRS
+             if os.path.isdir(os.path.join(HERE, d))
+             and os.listdir(os.path.join(HERE, d))]
+    if data:
+        print()
+        print("    Your own files in this folder are separate from the app:")
+        for path in data:
+            report(WARN, "yours", os.path.relpath(path, HERE))
+        if ask("Remove those too? (your stores, wording, targets and scans)",
+               default=False):
+            for path in data:
+                remove_path(path)
+                report(OK, "removed", os.path.relpath(path, HERE))
+
+    print()
+    print(GREEN("    Uninstalled."))
+    print()
+    print("    To install it again:")
+    print(BOLD("      python3 installer.py"))
+    print()
+    return 0
+
+
 # --------------------------------------------------------------------- steps
 def step_prerequisites(step, total):
     heading(step, total, "Checking what you already have")
@@ -483,9 +605,14 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--check", action="store_true", help="report only, change nothing")
     ap.add_argument("--yes", action="store_true", help="accept every prompt")
+    ap.add_argument("--uninstall", action="store_true",
+                    help="remove the app, its settings and its caches")
     args = ap.parse_args(argv)
     state["check_only"] = args.check
     state["assume_yes"] = args.yes and not args.check
+
+    if args.uninstall:
+        return uninstall()
 
     print()
     print(BOLD("  Wellness Smart Shopping - setup"))

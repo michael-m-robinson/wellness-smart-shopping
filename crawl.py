@@ -22,7 +22,7 @@ from datetime import date
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from dealcrawler import offers as offers_mod, stores as stores_mod, xmlout
+from dealcrawler import offers as offers_mod, paths, stores as stores_mod, xmlout
 from dealcrawler.sources import harvest
 
 SCAN_HELP = """
@@ -45,8 +45,8 @@ SCAN_HELP = """
 
 def load_config(path=None):
     for candidate in ([path] if path else []) + [
-            os.path.join(HERE, "config.json"),
-            os.path.join(HERE, "config.example.json")]:
+            paths.data("config.json"),
+            paths.source("config.example.json")]:
         if candidate and os.path.exists(candidate):
             try:
                 with open(candidate) as fh:
@@ -67,7 +67,7 @@ def main(argv=None):
     ap.add_argument("--stores", default="", help="comma list of store keys")
     ap.add_argument("--harvest", action="append", default=[], metavar="STORE=FILE",
                     help="use a scan file from somewhere other than harvest/")
-    ap.add_argument("--out", default=os.path.join(HERE, "out"))
+    ap.add_argument("--out", default=paths.data("out"))
     ap.add_argument("--report", action="store_true", help="print matches, write nothing")
     ap.add_argument("--per-weight", choices=["convert", "skip"], default=None)
     ap.add_argument("--no-snack-twins", action="store_true")

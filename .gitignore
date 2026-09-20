@@ -20,3 +20,6 @@ app/build/
 
 # Installer output
 requirements/detected.txt
+
+# Disk image output
+app/dist/

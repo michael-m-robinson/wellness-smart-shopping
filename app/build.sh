@@ -47,6 +47,20 @@ elif [ -f Resources/theme.png ]; then
   cp Resources/theme.png "$OUT/Contents/Resources/theme.png"
 fi
 
+# Ship the control panel inside the app so a drag-to-Applications install is
+# self-contained: no folder to find, nothing to keep next to it.
+echo "  bundling the control panel ..."
+PANEL="$OUT/Contents/Resources/panel"
+mkdir -p "$PANEL"
+for item in panel.py crawl.py dealcrawler themes browser examples \
+            config.example.json branding.example.json; do
+  [ -e "../$item" ] && cp -R "../$item" "$PANEL/"
+done
+# Caches and anyone's personal files must not travel inside the bundle.
+find "$PANEL" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+rm -f "$PANEL/config.json" "$PANEL/branding.json" "$PANEL/profile.json"
+rm -rf "$PANEL/harvest" "$PANEL/out"
+
 echo "  signing (ad-hoc) ..."
 codesign --force --deep --sign - "$OUT" >/dev/null 2>&1 || \
   echo "  ! could not sign; run: codesign --force --deep --sign - \"$OUT\""

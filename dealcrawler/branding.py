@@ -10,10 +10,14 @@ import json
 import os
 from typing import Dict, List
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-THEME_DIR = os.path.join(HERE, "themes")
-USER_FILE = os.path.join(HERE, "branding.json")
-EXAMPLE_FILE = os.path.join(HERE, "branding.example.json")
+from . import paths
+
+HERE = paths.SOURCE_DIR
+THEME_DIR = paths.source("themes")
+# Your own images live beside your other files, not inside the app bundle.
+USER_THEME_DIR = paths.data("themes")
+USER_FILE = paths.data("branding.json")
+EXAMPLE_FILE = paths.source("branding.example.json")
 
 # Every string the control panel can show. Override any of them in branding.json.
 DEFAULTS: Dict[str, str] = {
@@ -202,7 +206,11 @@ def greeting(brand: dict, hour: int) -> str:
 
 
 def themes() -> List[dict]:
-    """Every image in themes/ -- bundled or one the user dropped in."""
+    """Every image on offer: the ones that shipped, plus any you added.
+
+    Yours win on a name clash, so dropping in `farm-market.jpg` replaces the
+    bundled one rather than showing twice.
+    """
     described = {}
     meta = os.path.join(THEME_DIR, "THEMES.json")
     if os.path.exists(meta):
@@ -211,20 +219,26 @@ def themes() -> List[dict]:
                 described = json.load(fh)
         except (OSError, ValueError):
             described = {}
-    out = []
-    if os.path.isdir(THEME_DIR):
-        for fname in sorted(os.listdir(THEME_DIR)):
-            if os.path.isdir(os.path.join(THEME_DIR, fname)):
+
+    out, seen = [], set()
+    for folder, is_users in ((USER_THEME_DIR, True), (THEME_DIR, False)):
+        if not os.path.isdir(folder):
+            continue
+        for fname in sorted(os.listdir(folder)):
+            if os.path.isdir(os.path.join(folder, fname)):
                 continue
             stem, ext = os.path.splitext(fname)
-            if ext.lower() not in (".png", ".jpg", ".jpeg"):
+            if ext.lower() not in (".png", ".jpg", ".jpeg") or stem in seen:
                 continue
-            thumb = os.path.join(THEME_DIR, "thumbs", f"{stem}.jpg")
+            seen.add(stem)
+            thumb = os.path.join(folder, "thumbs", f"{stem}.jpg")
             out.append({
                 "name": stem,
                 "file": fname,
                 "thumb": f"thumbs/{stem}.jpg" if os.path.isfile(thumb) else fname,
+                "dir": folder,
+                "mine": is_users,
                 "description": described.get(stem, "Your own image"),
-                "bundled": stem in described,
+                "bundled": stem in described and not is_users,
             })
-    return out
+    return sorted(out, key=lambda t: t["name"])

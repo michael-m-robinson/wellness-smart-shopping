@@ -20,8 +20,10 @@ import os
 from dataclasses import asdict, dataclass
 from typing import Optional
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-PROFILE_FILE = os.path.join(HERE, "profile.json")
+from . import paths
+
+HERE = paths.SOURCE_DIR
+PROFILE_FILE = paths.data("profile.json")
 
 GOALS = {
     # key            label            calorie x  protein/lb  fat/lb

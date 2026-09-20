@@ -11,8 +11,10 @@ import os
 from dataclasses import dataclass, field
 from typing import Dict, List
 
-HERE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-HARVEST_DIR = os.path.join(HERE, "harvest")
+from . import paths
+
+HERE = paths.SOURCE_DIR
+HARVEST_DIR = paths.data("harvest")
 
 # Sensible starting points. Everything here is overridable in config.json, and
 # `store_id` is templated into the URLs so you point at your own branch.
