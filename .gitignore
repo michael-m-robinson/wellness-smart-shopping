@@ -3,7 +3,7 @@ config.json
 branding.json
 
 # Fetched store pages and generated output
-cache/
+harvest/*.txt
 out/
 
 # Harvested browser text

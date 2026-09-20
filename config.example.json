@@ -1,16 +1,27 @@
 {
-  "_comment": "Copy to config.json and set your own stores. Nothing here is personal by default.",
+  "_comment": "Copy to config.json and set your own stores. Adding a store needs no code: give it a name and the pages worth scanning.",
+  "_store_id_help": "For ShopRite, open shoprite.com, choose your store, and copy the number from the URL .../rsid/<store_id>/...",
   "stores": {
     "shoprite": {
       "enabled": true,
-      "store_id": "000",
-      "_store_id_help": "Open shoprite.com, choose your store, and copy the number from the URL .../rsid/<store_id>/..."
+      "name": "ShopRite",
+      "store_id": "000"
     },
     "stews": {
-      "enabled": true
+      "enabled": true,
+      "name": "Stew Leonard's"
     },
     "costco": {
-      "enabled": true
+      "enabled": true,
+      "name": "Costco"
+    },
+    "_example_your_own_store": {
+      "enabled": false,
+      "name": "My Local Market",
+      "urls": [
+        { "label": "Open the weekly ad", "url": "https://example.com/weekly-ad" },
+        { "label": "Open digital coupons", "url": "https://example.com/coupons" }
+      ]
     }
   },
   "per_weight": "convert",

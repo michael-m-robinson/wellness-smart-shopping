@@ -24,18 +24,15 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from dealcrawler import branding, offers as offers_mod, xmlout
-from dealcrawler.fetch import NeedsSignIn
-from dealcrawler.sources import costco, harvest, shoprite, stews
+from dealcrawler import branding, offers as offers_mod, stores as stores_mod, xmlout
+from dealcrawler.sources import harvest
 
-SOURCES = {"shoprite": shoprite, "stews": stews, "costco": costco}
 OUT_DIR = os.path.join(HERE, "out")
 
 _state = {"running": False, "last": None}
 _lock = threading.Lock()
 
 
-# ----------------------------------------------------------------- crawl
 def load_config() -> dict:
     for name in ("config.json", "config.example.json"):
         path = os.path.join(HERE, name)
@@ -48,30 +45,28 @@ def load_config() -> dict:
     return {}
 
 
-def run_refresh(store_keys=None, refresh=True) -> dict:
+def run_refresh() -> dict:
+    """Re-read every store's scan and rewrite the XML.
+
+    Nothing here touches the network: a store's deals arrive only from a scan
+    of your signed-in browser, saved into harvest/.
+    """
     cfg = load_config()
     per_weight = cfg.get("per_weight", "convert")
     use_twins = cfg.get("snack_twins", True)
-    keys = store_keys or [k for k in SOURCES
-                          if cfg.get("stores", {}).get(k, {}).get("enabled", True)]
 
-    stores, needs_signin, written = [], [], []
-    for key in keys:
-        mod = SOURCES.get(key)
-        if mod is None:
+    scanned, unscanned, written = [], [], []
+    for store in stores_mod.load(cfg):
+        if not store.scanned:
+            unscanned.append({"key": store.key, "store": store.name,
+                              "urls": store.urls, "path": store.harvest_path})
             continue
         try:
-            found = mod.crawl(refresh=refresh, per_weight=per_weight)
-        except NeedsSignIn as exc:
-            store_cfg = cfg.get("stores", {}).get(key, {})
-            urls = (mod.signin_urls(store_cfg.get("store_id", "000"))
-                    if hasattr(mod, "signin_urls") else [exc.url])
-            needs_signin.append({"key": key, "store": mod.STORE,
-                                 "reason": exc.reason, "urls": urls})
-            continue
-        except Exception as exc:  # a broken source must not take the panel down
-            needs_signin.append({"key": key, "store": mod.STORE,
-                                 "reason": f"could not be read ({exc})", "urls": []})
+            found = harvest.parse_file(store.harvest_path, store.name, per_weight)
+        except (OSError, ValueError) as exc:
+            unscanned.append({"key": store.key, "store": store.name,
+                              "urls": store.urls, "path": store.harvest_path,
+                              "error": f"could not read the scan ({exc})"})
             continue
 
         found = offers_mod.dedupe(found)
@@ -81,16 +76,20 @@ def run_refresh(store_keys=None, refresh=True) -> dict:
         path = ""
         if found:
             os.makedirs(OUT_DIR, exist_ok=True)
-            xml = xmlout.render(mod.STORE, found)
+            xml = xmlout.render(store.name, found)
             if not xmlout.validate(xml):
                 today = datetime.date.today()
-                path = os.path.join(OUT_DIR, f"{key}-sales-{today:%Y-%m-%d}.xml")
+                path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
                 with open(path, "w", encoding="utf-8") as fh:
                     fh.write(xml)
                 written.append(path)
 
-        stores.append({
-            "key": key, "store": mod.STORE, "count": len(found), "file": path,
+        age = store.scan_age_hours
+        scanned.append({
+            "key": store.key, "store": store.name, "count": len(found),
+            "file": path,
+            "age": (f"scanned {age:.0f}h ago" if age and age >= 1
+                    else "scanned just now"),
             "offers": [{
                 "item": o.item_id,
                 "amount": (f"save ${o.savings:.2f}" if o.savings is not None
@@ -99,55 +98,23 @@ def run_refresh(store_keys=None, refresh=True) -> dict:
             } for o in found],
         })
 
-    return {"stores": stores, "needs_signin": needs_signin, "written": written,
+    return {"stores": scanned, "unscanned": unscanned, "written": written,
             "when": datetime.datetime.now().strftime("%a %d %b, %H:%M")}
 
 
-# A store can expose more than one page worth opening (a coupon list and a
-# weekly ad), so label each link by what it actually opens.
-LINK_LABELS = (
-    ("digital-coupon", "Open the digital coupon list"),
-    ("weekly-ad", "Open the weekly ad"),
-    ("flyer", "Open the weekly flyer"),
-    ("warehouse-savings", "Open warehouse savings"),
-)
-
-
-def link_label(url: str, store: str) -> str:
-    for needle, label in LINK_LABELS:
-        if needle in url:
-            return label
-    return f"Open {store}"
-
-
 def scan_help() -> list:
-    """Per-store scanning directions, built from the stores actually enabled.
-
-    Each store says whether it can be read without signing in, and gives the
-    exact page to open and the exact command to run afterwards.
-    """
-    cfg = load_config()
+    """Per-store scanning directions, built from the configured stores."""
     out = []
-    for key, mod in SOURCES.items():
-        if not cfg.get("stores", {}).get(key, {}).get("enabled", True):
-            continue
-        store_cfg = cfg.get("stores", {}).get(key, {})
-        urls = (mod.signin_urls(store_cfg.get("store_id", "000"))
-                if hasattr(mod, "signin_urls") else [])
-        # A store with its own crawl() that does not need a browser is automatic.
-        public = key == "costco" or key == "shoprite"
+    for store in stores_mod.load(load_config()):
         out.append({
-            "key": key,
-            "store": mod.STORE,
-            "urls": [{"url": u, "label": link_label(u, mod.STORE)} for u in urls],
-            "public": public,
-            "public_note": ("Refresh Deals already reads this store's public "
-                            "deals. Scan it as well to pick up the coupons that "
-                            "only appear when you are signed in."
-                            if public else
-                            "This store can only be read from a signed-in "
-                            "browser, so it must be scanned."),
-            "command": f"python3 crawl.py --harvest {key}=offers.txt",
+            "key": store.key,
+            "store": store.name,
+            "urls": store.urls,
+            "scanned": store.scanned,
+            "path": store.harvest_path,
+            "note": ("Every store is read the same way: from the page you are "
+                     "signed in to. Nothing is fetched behind your back."),
+            "command": f"python3 crawl.py --stores {store.key}",
         })
     return out
 
@@ -167,14 +134,13 @@ def page() -> str:
         links = "".join(
             f'<p><a href="{html.escape(u["url"])}" target="_blank" rel="noopener">'
             f'{html.escape(u["label"])}</a></p>' for u in st["urls"])
-        badge = ('<span class="pill auto">reads without signing in</span>'
-                 if st["public"] else
-                 '<span class="pill need">needs sign-in</span>')
+        badge = ('<span class="pill auto">scanned</span>' if st["scanned"]
+                 else '<span class="pill need">not scanned yet</span>')
         stores_html += (
             f'<div class="store-help"><div class="sh-head"><strong>'
-            f'{html.escape(st["store"])}</strong>{badge}</div>'
-            f'<p class="muted">{html.escape(st["public_note"])}</p>{links}'
-            f'<code>{html.escape(st["command"])}</code></div>')
+            f'{html.escape(st["store"])}</strong>{badge}</div>{links}'
+            f'<p class="muted" style="margin:6px 0 0">Save the scan as:</p>'
+            f'<code>{html.escape(st["path"])}</code></div>')
     themes_html = "".join(
         f'<button class="theme{" on" if t["name"] == theme else ""}" '
         f'data-theme="{html.escape(t["name"])}" title="{html.escape(t["description"])}">'
@@ -369,7 +335,8 @@ function render(d) {{
   for (const s of d.stores || []) {{
     h += '<div class="card"><div class="store-line"><h2>' + esc(s.store) +
          '</h2><span class="muted">' + s.count + ' deal' +
-         (s.count === 1 ? '' : 's') + '</span></div>';
+         (s.count === 1 ? '' : 's') +
+         (s.age ? ' &middot; ' + esc(s.age) : '') + '</span></div>';
     if (!s.count) h += '<p class="muted">Nothing matched your staples.</p>';
     for (const o of s.offers) {{
       h += '<div class="deal"><span class="amt">' + esc(o.amount) +
@@ -381,15 +348,17 @@ function render(d) {{
     if (s.file) h += '<p class="files" style="margin:12px 0 0">' + esc(s.file) + '</p>';
     h += '</div>';
   }}
-  for (const n of d.needs_signin || []) {{
+  for (const n of d.unscanned || []) {{
     h += '<div class="card warn"><h2>' + esc(n.store) +
-         ' needs you signed in</h2><p class="muted">' + esc(n.reason) + '</p>';
+         ' has not been scanned yet</h2>';
+    if (n.error) h += '<p class="muted">' + esc(n.error) + '</p>';
     for (const u of n.urls || [])
-      h += '<p><a href="' + esc(u) + '" target="_blank" rel="noopener">Open ' +
-           esc(n.store) + ' in a new tab</a></p>';
-    h += '<p class="muted">Sign in, open the weekly ad or coupon list, then ask ' +
-         'Claude (Claude for Chrome extension) to run browser/harvest.js on that ' +
-         'tab and refresh again.</p></div>';
+      h += '<p><a href="' + esc(u.url) + '" target="_blank" rel="noopener">' +
+           esc(u.label) + '</a></p>';
+    h += '<p class="muted">Sign in, let the coupon list load, then ask Claude ' +
+         '(Claude for Chrome extension) to run browser/harvest.js on that tab. ' +
+         'Save what it prints as:</p><p class="files">' + esc(n.path) +
+         '</p><p class="muted">Then press Refresh Deals.</p></div>';
   }}
   if (d.when) h += '<p class="muted">Checked ' + esc(d.when) + '</p>';
   $("#results").innerHTML = h || '<div class="card"><p class="muted">Nothing found.</p></div>';

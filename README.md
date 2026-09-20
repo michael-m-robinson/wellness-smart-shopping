@@ -10,9 +10,9 @@
 **Turn this week's grocery sales into a shopping list that still hits your
 nutrition targets.**
 
-Wellness Smart Shopping reads the weekly deals, digital coupons and instant savings
-from your grocery stores, matches them to the staples on your list, and writes
-a small XML file. You import that file into the
+Wellness Smart Shopping reads the weekly deals, digital coupons and instant
+savings from the store pages **you** are signed in to, matches them to the
+staples on your list, and writes a small XML file. You import that file into the
 [companion desktop app](#the-companion-desktop-app) and it re-prices your
 list, re-ranks your recipes, and tells you what the trip should actually cost.
 
@@ -83,10 +83,11 @@ cut, because the numbers are on their side.
 
 | Requirement | Why |
 | --- | --- |
-| **A Claude subscription** | Required. The sign-in-protected stores are read by Claude driving your browser. |
-| **The Claude for Chrome extension** | Required. This is what runs the harvest script inside the store page you are signed in to. |
+| **A Claude subscription** | Required. Every store is read by Claude from your own browser. |
+| **The Claude for Chrome extension** | Required. This is what runs the scan inside the store page you are signed in to. |
 | **Python 3.9+** | The crawler itself. Standard library only — nothing to install. |
 | **Chrome, signed in to your stores** | Digital coupons and member pricing only exist inside your own logged-in session. |
+| No network access of its own | This program never contacts a store. A test enforces it. |
 | The Smart Shopping List desktop app | Optional. The XML is plain text and can be read by anything. |
 
 > **Please sign in to your stores before crawling.** Most grocers serve deals
@@ -94,13 +95,17 @@ cut, because the numbers are on their side.
 > print exactly which store needs you and which page to open — it will not
 > quietly return an empty file.
 
-**Why a Claude subscription is needed:** stores like ShopRite and Stew
-Leonard's block plain scripts outright (HTTP 403) and render their offers in
-JavaScript behind an account. There is no public feed to read. The only
-reliable way in is a real browser that is already signed in as you, and that is
-what the Claude for Chrome extension provides. Stores that *do* publish a
-public deals page — Costco's warehouse savings, for example — are read directly
-with no browser and no subscription involved.
+**Why a Claude subscription is needed:** a store's real coupon list exists only
+inside your signed-in session, and the pages that show it are JavaScript apps
+that block plain scripts outright. There is no public feed to read. Rather than
+scrape third-party coupon blogs -- which are noisy, often wrong, and not the
+store's own numbers -- this project reads the genuine article: the page you
+already have open, in your own browser, with your own account. That is what the
+Claude for Chrome extension does.
+
+A useful side effect: **this program has no network access at all.** It cannot
+contact a store, so it cannot be blocked, rate-limited, or quietly scrape
+anything on your behalf. It only ever reads a file you saved.
 
 ---
 
@@ -132,10 +137,9 @@ nothing uploaded anywhere -- with:
 
 ### Scanning a store
 
-Some stores publish deals anyone can read; others show their real coupon list
-only to a signed-in browser. **How to Scan** in the control panel spells out
-which is which for your stores, and gives you the page link and command for
-each:
+Every store is read the same way: from a page you are signed in to. **How to
+Scan** in the control panel gives you the link to open and the exact file to
+save, per store:
 
 <p align="center"><img src="docs/img/how-to-scan.jpg" alt="The How to Scan popup: five numbered steps, then a card per store showing whether it reads without signing in or needs sign-in, with links to its coupon list and weekly ad and the harvest command to run" width="720"></p>
 
@@ -145,12 +149,25 @@ The short version:
 2. Open its weekly ad or digital coupon list and scroll once so every offer loads.
 3. Ask Claude, with the Claude for Chrome extension enabled:
    *"run browser/harvest.js on this tab"*.
-4. Claude scrolls the whole list and prints one offer per line. Save that to a
-   text file.
-5. Feed it back and refresh:
+4. Claude scrolls the whole list and prints one offer per line. Save that as
+   `harvest/shoprite.txt` (the panel shows the exact path for each store).
+5. Press **Refresh Deals**, or run:
 
 ```bash
-python3 crawl.py --harvest shoprite=offers.txt
+python3 crawl.py
+```
+
+`examples/sample-scan.txt` shows the shape of a scan if you want to try the
+pipeline before scanning anything real:
+
+```
+Boneless Skinless Chicken Breast | $1.99/lb | Limit 4
+93% Lean Ground Turkey | $3.49 | Limit 2
+Large Eggs 18 ct | $2.49 |
+```
+
+```bash
+python3 crawl.py --harvest shoprite=examples/sample-scan.txt --report
 ```
 
 Your password never leaves the store's own site -- scanning only reads the
@@ -276,38 +293,21 @@ python3 crawl.py
 # One store at a time
 python3 crawl.py --stores costco
 
-# Ignore the local cache and re-fetch
-python3 crawl.py --refresh
+# How to scan each store, printed to the terminal
+python3 crawl.py --scan-help
+
+# Use a scan saved somewhere else
+python3 crawl.py --harvest stews=~/Downloads/stews.txt
 ```
+
+A store you have not scanned yet prints its own directions instead of failing
+silently.
 
 Files land in `out/`, one per store plus an optional combined file:
 
 ```
 out/shoprite-sales-2026-09-20.xml
 out/costco-sales-2026-09-20.xml
-```
-
-### Stores that need your browser
-
-When a store is behind a login, the crawler tells you so:
-
-```
-  Stew Leonard's needs you to be signed in.
-  the site returned HTTP 403; its deals are behind a sign-in or bot
-  check and must be read from your signed-in browser
-```
-
-To collect those deals:
-
-1. Sign in to the store in Chrome and open its weekly ad / digital coupon list.
-2. Ask Claude (with the Claude for Chrome extension on) to run
-   `browser/harvest.js` on that tab. It scrolls the page so lazy offers load,
-   then prints one offer per line. If you are signed out it says so instead of
-   returning nothing.
-3. Save that output to a file and feed it back:
-
-```bash
-python3 crawl.py --harvest stews=offers.txt
 ```
 
 ### Import into the app
@@ -326,8 +326,8 @@ The app applies every offer whose `itemId` it recognises and ignores the rest.
 | --- | --- |
 | `--report` | Print matches and the reasoning behind each number; write nothing. |
 | `--stores a,b` | Limit to specific stores. |
-| `--harvest store=file` | Use browser-harvested text for a store. |
-| `--refresh` | Bypass the local page cache. |
+| `--harvest store=file` | Use a scan saved somewhere other than `harvest/`. |
+| `--scan-help` | Print scanning directions for every store. |
 | `--per-weight convert\|skip` | Convert `$/lb` deals to per-package (default) or drop them. |
 | `--no-snack-twins` | Do not mirror a deal onto the snack line items. |
 | `--combined` | Also write one all-stores file. |
@@ -337,16 +337,25 @@ The app applies every offer whose `itemId` it recognises and ignores the rest.
 
 ## Adding your own store
 
-Each store is one small module in `dealcrawler/sources/`. A module needs a
-`STORE` name, a `crawl()` that returns `Offer` objects, and optionally
-`signin_urls()` for the sign-in prompt. Parsing helpers, price maths and the
-XML writer are shared, so a new store is usually a parser and a URL. Register
-it in the `SOURCES` map in `crawl.py`.
+No code required. Because nothing is fetched, a store is just a name and the
+pages worth scanning -- add it to `config.json`:
 
-If a store blocks scripts, you do not need a parser at all — point people at
-`browser/harvest.js` and accept the harvested text.
+```json
+"stores": {
+  "mymarket": {
+    "enabled": true,
+    "name": "My Local Market",
+    "urls": [
+      { "label": "Open the weekly ad", "url": "https://example.com/weekly-ad" },
+      { "label": "Open digital coupons", "url": "https://example.com/coupons" }
+    ]
+  }
+}
+```
 
----
+It appears in the control panel immediately, with its own scan directions and
+its own `harvest/mymarket.txt`. The matcher, price maths and XML writer are
+shared, so any store benefits from them.
 
 ## The companion desktop app
 
@@ -368,13 +377,14 @@ a script, or by hand — this crawler is just one producer.
 
 ## Privacy
 
-- The crawler and the control panel run entirely on your machine.
+- The crawler and the control panel run entirely on your machine, and make no
+  network requests of any kind.
 - The panel binds to `127.0.0.1` only -- it is not reachable from
   your network.
 - **It never sees, asks for, or stores your store passwords.** Sign-in happens
   in your own browser; only the visible text of a page you already opened is
   ever read.
-- `config.json`, `branding.json`, `cache/` and `out/` are git-ignored so your store numbers and
+- `config.json`, `branding.json`, `harvest/` and `out/` are git-ignored so your store numbers and
   local data stay off GitHub.
 
 ---

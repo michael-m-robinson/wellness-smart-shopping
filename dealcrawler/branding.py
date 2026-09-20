@@ -40,9 +40,10 @@ DEFAULTS: Dict[str, str] = {
     "save_button": "Save",
 
     "scan_title": "Scanning a store for deals",
-    "scan_intro": ("Stores show their real coupon list only to a signed-in "
-                   "browser. Scanning means reading that list from the page you "
-                   "already have open - no password ever leaves the store site."),
+    "scan_intro": ("Every deal comes from a store page you are signed in to - "
+                   "this app never contacts a store itself. Scanning reads the "
+                   "visible coupon list from the tab you already have open, so "
+                   "no password ever leaves the store site."),
     "scan_steps": [
         "Sign in to the store in Chrome.",
         "Open its weekly ad or digital coupon list and scroll once so every "
@@ -50,9 +51,8 @@ DEFAULTS: Dict[str, str] = {
         "Ask Claude, with the Claude for Chrome extension enabled: "
         "\"run browser/harvest.js on this tab\".",
         "Claude scrolls the whole list and prints one offer per line. Save that "
-        "to a text file.",
-        "Run the harvest command shown for that store below, then press "
-        "Refresh Deals.",
+        "as harvest/<store>.txt - the exact path is shown per store below.",
+        "Press Refresh Deals. The scan is turned into XML you import.",
     ],
     "scan_note": ("If a page says you are signed out, sign in and open the "
                   "coupon list again - harvest.js will tell you rather than "

@@ -196,12 +196,12 @@ class TestScanDirections(unittest.TestCase):
     def test_each_store_has_a_runnable_command(self):
         import panel
         for st in panel.scan_help():
-            self.assertIn(f"--harvest {st['key']}=", st["command"])
+            self.assertIn(st["key"], st["command"])
 
-    def test_login_walled_store_is_marked(self):
+    def test_each_store_names_where_its_scan_goes(self):
         import panel
-        stews = next(s for s in panel.scan_help() if s["key"] == "stews")
-        self.assertFalse(stews["public"])
+        for st in panel.scan_help():
+            self.assertTrue(st["path"].endswith(f"{st['key']}.txt"), st["path"])
 
     def test_links_are_labelled_by_purpose(self):
         import panel
@@ -241,6 +241,46 @@ class TestRetireAppButtons(unittest.TestCase):
         import retire_app_buttons as r
         joined = b" ".join(rep for _, rep in r.RETIREMENTS).lower()
         self.assertIn(b"control panel", joined)
+
+
+class TestNoNetworkAccess(unittest.TestCase):
+    """Deals come only from a browser scan. Nothing here may fetch a store."""
+
+    SOURCE_FILES = ["crawl.py", "panel.py", "personalize.py"]
+
+    def test_no_http_client_imports(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        files = [os.path.join(root, f) for f in self.SOURCE_FILES]
+        for sub in ("dealcrawler", os.path.join("dealcrawler", "sources")):
+            d = os.path.join(root, sub)
+            files += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".py")]
+        banned = ("import urllib", "from urllib", "import requests",
+                  "import http.client", "urlopen")
+        for path in files:
+            with open(path, encoding="utf-8") as fh:
+                body = fh.read()
+            for needle in banned:
+                self.assertNotIn(needle, body,
+                                 msg=f"{os.path.basename(path)} still fetches ({needle})")
+
+    def test_stores_are_config_driven(self):
+        from dealcrawler import stores
+        loaded = stores.load({"stores": {"mymarket": {
+            "name": "My Market",
+            "urls": [{"label": "Open deals", "url": "https://example.test/deals"}],
+        }}})
+        keys = {s.key for s in loaded}
+        self.assertIn("mymarket", keys)
+
+    def test_store_id_is_templated_into_urls(self):
+        from dealcrawler import stores
+        shoprite = stores.get("shoprite", {"stores": {"shoprite": {"store_id": "141"}}})
+        self.assertTrue(any("/rsid/141/" in u["url"] for u in shoprite.urls))
+
+    def test_disabled_store_is_dropped(self):
+        from dealcrawler import stores
+        keys = {s.key for s in stores.load({"stores": {"costco": {"enabled": False}}})}
+        self.assertNotIn("costco", keys)
 
 
 if __name__ == "__main__":
