@@ -14,6 +14,7 @@ declined -- a declined step only removes the feature it belongs to.
 
 import argparse
 import json
+import plistlib
 import os
 import platform
 import shutil
@@ -180,6 +181,94 @@ def check_extension():
     return False, ""
 
 
+# ------------------------------------------------------------- one copy only
+# Two installed copies of the same app is a real trap: you open one, it is the
+# old build, and nothing you changed appears. The identifier is matched rather
+# than the name so a bundle renamed with build.sh is still recognised.
+OUR_IDENTIFIER_PREFIX = "org.wellnesssmartshopping."
+LEGACY_IDENTIFIERS = ("local.codex.smartshoppinglist",)
+CANONICAL_DIR = os.path.expanduser("~/Applications")
+
+SEARCH_ROOTS = ["/Applications", "~/Applications", "~/Desktop", "~/Downloads",
+                "~/dev", "~/Documents"]
+
+
+def bundle_identifier(app):
+    try:
+        with open(os.path.join(app, "Contents", "Info.plist"), "rb") as fh:
+            return str(plistlib.load(fh).get("CFBundleIdentifier", ""))
+    except Exception:
+        return ""
+
+
+def find_installed_copies():
+    """Every copy on this machine: (path, identifier, is_ours)."""
+    found = {}
+    roots = [os.path.expanduser(r) for r in SEARCH_ROOTS]
+    roots.append(os.path.dirname(HERE))
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        for dirpath, dirnames, _ in os.walk(root):
+            if dirpath.count(os.sep) - root.count(os.sep) > 2:
+                dirnames[:] = []
+                continue
+            for name in list(dirnames):
+                if not name.endswith(".app"):
+                    continue
+                path = os.path.realpath(os.path.join(dirpath, name))
+                # Skip the build output: it is what we install *from*.
+                if os.path.join("app", "build") in path:
+                    continue
+                ident = bundle_identifier(path)
+                if ident.startswith(OUR_IDENTIFIER_PREFIX):
+                    found[path] = (ident, True)
+                elif ident in LEGACY_IDENTIFIERS:
+                    found[path] = (ident, False)
+            dirnames[:] = [d for d in dirnames if not d.endswith(".app")]
+    return [(p, i, ours) for p, (i, ours) in sorted(found.items())]
+
+
+def step_one_copy(step, total):
+    heading(step, total, "Making sure there is only one copy")
+    copies = find_installed_copies()
+    ours = [p for p, _, mine in copies if mine]
+    legacy = [(p, i) for p, i, mine in copies if not mine]
+
+    if not ours:
+        report(WARN, "installed app", "none yet - build and install it above")
+    canonical = os.path.join(CANONICAL_DIR, "Wellness Smart Shopping.app")
+    for path in ours:
+        if os.path.realpath(path) == os.path.realpath(canonical):
+            report(OK, "kept", path)
+        else:
+            report(WARN, "duplicate", path)
+
+    extras = [p for p in ours if os.path.realpath(p) != os.path.realpath(canonical)]
+    if extras and os.path.isdir(canonical):
+        if state["check_only"]:
+            report(WARN, "duplicates", f"{len(extras)} would be removed")
+        elif ask(f"Remove {len(extras)} duplicate cop{'y' if len(extras) == 1 else 'ies'}? "
+                 f"(the one in Applications is kept)", default=True):
+            for path in extras:
+                shutil.rmtree(path, ignore_errors=True)
+                report(OK, "removed", path)
+    elif extras:
+        report(WARN, "duplicates", "keeping them: nothing is installed in Applications yet")
+
+    if legacy:
+        print()
+        print("    Older builds of the original app are also on this machine.")
+        print("    They are a different app, and yours to keep or remove:")
+        for path, ident in legacy:
+            report(WARN, "older build", path)
+        if not state["check_only"] and ask("Remove those too?", default=False):
+            for path, _ in legacy:
+                shutil.rmtree(path, ignore_errors=True)
+                report(OK, "removed", path)
+    return True
+
+
 # --------------------------------------------------------------------- steps
 def step_prerequisites(step, total):
     heading(step, total, "Checking what you already have")
@@ -277,7 +366,7 @@ def step_build(step, total):
     state["built_app"] = app
 
     if ask("Install it to your Applications folder?", default=True):
-        target_dir = os.path.expanduser("~/Applications")
+        target_dir = CANONICAL_DIR
         os.makedirs(target_dir, exist_ok=True)
         target = os.path.join(target_dir, os.path.basename(app))
         if os.path.isdir(target):
@@ -287,6 +376,10 @@ def step_build(step, total):
                        capture_output=True)
         report(OK, "installed", target)
         state["installed_app"] = target
+        # The build output is only a staging copy; leaving it behind is how
+        # you end up with two apps and no idea which one you just opened.
+        shutil.rmtree(app, ignore_errors=True)
+        report(OK, "build output cleared", "so only the installed copy remains")
     return True
 
 
@@ -311,7 +404,14 @@ def step_verify(step, total):
     else:
         report(BAD, "test suite", summary or "failed")
 
+    # Fall back to the installed copy, so skipping the build still verifies
+    # the app that is actually on this machine.
     app = state.get("installed_app") or state.get("built_app")
+    if not app or not os.path.isdir(app):
+        app = os.path.join(CANONICAL_DIR, "Wellness Smart Shopping.app")
+    if not os.path.isdir(app):
+        installed = [p for p, _, ours in find_installed_copies() if ours]
+        app = installed[0] if installed else None
     if app:
         binary = os.path.join(app, "Contents", "MacOS", "SmartShoppingList")
         if os.path.isfile(binary):
@@ -378,7 +478,8 @@ def main(argv=None):
     if args.check:
         print(YELLOW("  Check only - nothing will be changed."))
 
-    steps = [step_prerequisites, step_config, step_build, step_verify, step_finish]
+    steps = [step_prerequisites, step_config, step_build, step_one_copy,
+             step_verify, step_finish]
     total = len(steps)
     for index, step in enumerate(steps, start=1):
         try:

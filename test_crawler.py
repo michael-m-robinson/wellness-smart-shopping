@@ -789,6 +789,34 @@ class TestInstaller(unittest.TestCase):
         for browser in ("Microsoft Edge", "Brave", "Arc", "Chromium"):
             self.assertIn(browser, self.src)
 
+    def test_only_one_installed_copy_is_allowed(self):
+        """Two installed copies is a real trap: you open the old one and
+        nothing you changed appears."""
+        self.assertIn("def find_installed_copies", self.src)
+        self.assertIn("def step_one_copy", self.src)
+        self.assertIn("CANONICAL_DIR", self.src)
+
+    def test_copies_are_matched_by_identifier_not_name(self):
+        """build.sh can rename the bundle, so the name proves nothing."""
+        self.assertIn("OUR_IDENTIFIER_PREFIX", self.src)
+        self.assertIn("def bundle_identifier", self.src)
+
+    def test_build_output_is_not_counted_as_a_copy(self):
+        self.assertIn('os.path.join("app", "build") in path', self.src)
+
+    def test_older_builds_are_not_removed_by_default(self):
+        """Someone else's original app is theirs to keep."""
+        block = self.src[self.src.index("LEGACY_IDENTIFIERS"):]
+        block = block[:block.index("# ------------------------------- steps")] \
+            if "# ------------------------------- steps" in block else block
+        self.assertIn('ask("Remove those too?", default=False)', self.src)
+
+    def test_duplicate_removal_is_confirmed(self):
+        self.assertIn("Remove {len(extras)} duplicate cop", self.src)
+
+    def test_installed_app_is_verified_even_if_build_skipped(self):
+        self.assertIn("if not app or not os.path.isdir(app):", self.src)
+
     def test_double_click_entry_point_exists(self):
         path = os.path.join(self.root, "install.command")
         self.assertTrue(os.path.isfile(path))
