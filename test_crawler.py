@@ -657,10 +657,48 @@ class TestDesktopAppSource(unittest.TestCase):
         self.assertIn("func openControlPanel", self.src)
         self.assertIn("127.0.0.1:8765", self.src)
 
+    def test_app_starts_the_panel_rather_than_giving_directions(self):
+        self.assertIn("func locateControlPanel", self.src)
+        self.assertIn('arguments = ["python3", script.path, "--no-open"]', self.src)
+
+    def test_app_stops_the_panel_it_started(self):
+        self.assertIn("func stopControlPanel", self.src)
+        self.assertIn("func applicationWillTerminate", self.src)
+        self.assertIn("process.terminate()", self.src)
+
+    def test_readiness_probe_uses_get_not_head(self):
+        """http.server answers HEAD with 501, which made a live panel look dead."""
+        probe = self.src[self.src.index("var controlPanelIsRunning"):]
+        probe = probe[:probe.index("func locateControlPanel")]
+        self.assertIn('httpMethod = "GET"', probe)
+        self.assertNotIn('httpMethod = "HEAD"', probe)
+
+    def test_panel_window_survives_losing_focus(self):
+        """NSPanel hides on deactivate by default, so it vanished when the
+        browser opened."""
+        self.assertIn("panel.hidesOnDeactivate = false", self.src)
+
+    def test_deals_panel_has_no_item_list(self):
+        self.assertNotIn("couponFields", self.src)
+        self.assertIn('NSButton(title: "Start Control Panel"', self.src)
+
+    def test_closing_the_panel_does_not_wipe_imported_deals(self):
+        close = self.src[self.src.index("@objc func saveCoupons"):]
+        close = close[:close.index("\n    }")]
+        self.assertNotIn("couponValues = saved", close)
+        self.assertNotIn("couponFields", close)
+
     def test_build_script_is_executable(self):
         build = os.path.join(os.path.dirname(self.path), "build.sh")
         self.assertTrue(os.path.isfile(build))
         self.assertTrue(os.access(build, os.X_OK))
+
+
+class TestPanelHeadProbe(unittest.TestCase):
+    def test_head_is_answered(self):
+        """The desktop app probes the panel before opening a browser on it."""
+        import panel
+        self.assertIn("def do_HEAD", open(panel.__file__, encoding="utf-8").read())
 
 
 if __name__ == "__main__":

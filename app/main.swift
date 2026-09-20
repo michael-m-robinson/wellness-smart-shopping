@@ -1729,7 +1729,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var couponValues: [String: Double] = [:]
     var couponLimits: [String: Int] = [:]
     var couponSources: [String: String] = [:]
-    var couponFields: [String: NSTextField] = [:]
+    var controlPanelProcess: Process?
+    weak var controlPanelButton: NSButton?
+    weak var controlPanelSpinner: NSProgressIndicator?
     var couponsPanel: NSPanel?
     var couponScanStatus: NSTextField?
     var lastPDFURL: URL?
@@ -1783,6 +1785,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
+
+    func applicationWillTerminate(_ notification: Notification) {
+        // We started the control panel, so we stop it.
+        stopControlPanel()
+    }
 
     private func makeMenu() {
         let main = NSMenu()
@@ -2043,60 +2050,60 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             panel.makeKeyAndOrderFront(nil)
             return
         }
-        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 720, height: 740), styleMask: [.titled, .closable, .resizable], backing: .buffered, defer: false)
+        let panel = NSPanel(contentRect: NSRect(x: 0, y: 0, width: 560, height: 260),
+                            styleMask: [.titled, .closable], backing: .buffered, defer: false)
         panel.isReleasedWhenClosed = false
-        panel.title = "Deals scanned with Claude"
+        // NSPanel hides itself when the app deactivates, which would make this
+        // vanish the moment the browser opens. Keep it on screen.
+        panel.hidesOnDeactivate = false
+        panel.title = "Scan with Claude"
         panel.center()
-        let note = NSTextField(wrappingLabelWithString: "Deals are scanned from the store page you are signed in to, using the Claude for Chrome extension, and imported here. Open the control panel to scan, then use Import Sales XML to apply the file it writes. Quantity limits from the scan are honoured; values are per package.")
-        note.frame = NSRect(x: 20, y: 682, width: 680, height: 45); note.font = .systemFont(ofSize: 10); note.textColor = .darkGray; panel.contentView?.addSubview(note)
 
-        let openPanelButton = NSButton(title: "Open Control Panel", target: self, action: #selector(openControlPanel(_:)))
-        openPanelButton.toolTip = "Opens the Wellness Smart Shopping control panel, where Claude scans your stores."
-        openPanelButton.frame = NSRect(x: 20, y: 637, width: 180, height: 32); openPanelButton.bezelStyle = .rounded; panel.contentView?.addSubview(openPanelButton)
-        let importTop = NSButton(title: "Import Sales XML...", target: self, action: #selector(importSalesXML(_:)))
-        importTop.toolTip = "Import the sales XML the control panel wrote after a scan."
-        importTop.frame = NSRect(x: 208, y: 637, width: 175, height: 32); importTop.bezelStyle = .rounded; panel.contentView?.addSubview(importTop)
+        let heading = NSTextField(labelWithString: "Scan this week's deals")
+        heading.font = .systemFont(ofSize: 15, weight: .semibold)
+        heading.frame = NSRect(x: 24, y: 206, width: 512, height: 24)
+        panel.contentView?.addSubview(heading)
 
-        let scanStatus = NSTextField(wrappingLabelWithString: "No deals imported yet. Open the control panel, press Scan with Claude, then import the file it writes.")
-        scanStatus.frame = NSRect(x: 20, y: 590, width: 680, height: 40); scanStatus.font = .systemFont(ofSize: 9.5, weight: .medium); scanStatus.textColor = .darkGray; panel.contentView?.addSubview(scanStatus)
+        let note = NSTextField(wrappingLabelWithString: "Start the control panel and Claude reads this week's deals from the store page you are signed in to. It writes a sales file, which you import here.")
+        note.frame = NSRect(x: 24, y: 152, width: 512, height: 48)
+        note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
+        panel.contentView?.addSubview(note)
+
+        let startButton = NSButton(title: "Start Control Panel", target: self, action: #selector(openControlPanel(_:)))
+        startButton.frame = NSRect(x: 24, y: 104, width: 180, height: 32)
+        startButton.bezelStyle = .rounded; startButton.keyEquivalent = "\r"
+        panel.contentView?.addSubview(startButton)
+        controlPanelButton = startButton
+
+        let importXML = NSButton(title: "Import Sales XML...", target: self, action: #selector(importSalesXML(_:)))
+        importXML.toolTip = "Import the sales file the control panel wrote after a scan."
+        importXML.frame = NSRect(x: 212, y: 104, width: 170, height: 32)
+        importXML.bezelStyle = .rounded
+        panel.contentView?.addSubview(importXML)
+
+        let spinner = NSProgressIndicator(frame: NSRect(x: 24, y: 68, width: 16, height: 16))
+        spinner.style = .spinning; spinner.isDisplayedWhenStopped = false
+        panel.contentView?.addSubview(spinner)
+        controlPanelSpinner = spinner
+
+        let scanStatus = NSTextField(wrappingLabelWithString: controlPanelIsRunning
+            ? "The control panel is running. Scan there, then import the file here."
+            : "No deals imported yet. Start the control panel to scan.")
+        scanStatus.frame = NSRect(x: 46, y: 56, width: 490, height: 34)
+        scanStatus.font = .systemFont(ofSize: 11); scanStatus.textColor = .secondaryLabelColor
+        panel.contentView?.addSubview(scanStatus)
         couponScanStatus = scanStatus
 
-        let scroll = NSScrollView(frame: NSRect(x: 18, y: 62, width: 684, height: 520))
-        scroll.hasVerticalScroller = true
-        scroll.borderType = .bezelBorder
-        let document = NSView(frame: NSRect(x: 0, y: 0, width: 660, height: CGFloat(catalog.count * 34 + 18)))
-        couponFields.removeAll()
-        for (index, item) in catalog.enumerated() {
-            let rowY = document.frame.height - CGFloat((index + 1) * 34)
-            let sourceNote = couponSources[item.id].map { " • found at \($0)" } ?? ""
-            let itemLabel = NSTextField(labelWithString: "\(item.name) - \(item.store)\(sourceNote)")
-            itemLabel.frame = NSRect(x: 12, y: rowY + 4, width: 470, height: 22)
-            itemLabel.font = .systemFont(ofSize: 10.5)
-            document.addSubview(itemLabel)
-            let dollar = NSTextField(labelWithString: "$")
-            dollar.frame = NSRect(x: 490, y: rowY + 4, width: 12, height: 22)
-            document.addSubview(dollar)
-            let field = NSTextField(string: couponValues[item.id].map { String(format: "%.2f", $0) } ?? "")
-            field.identifier = NSUserInterfaceItemIdentifier(item.id)
-            field.placeholderString = "0.00"
-            field.frame = NSRect(x: 504, y: rowY + 1, width: 72, height: 25)
-            if let limit = couponLimits[item.id] { field.toolTip = "Official offer limit: \(limit) package(s)" }
-            document.addSubview(field)
-            let unit = NSTextField(labelWithString: "per package")
-            unit.frame = NSRect(x: 580, y: rowY + 4, width: 72, height: 22)
-            unit.font = .systemFont(ofSize: 9); unit.textColor = .darkGray
-            document.addSubview(unit)
-            couponFields[item.id] = field
-        }
-        scroll.documentView = document
-        panel.contentView?.addSubview(scroll)
-        let importXML = NSButton(title: "Import Sales XML...", target: self, action: #selector(importSalesXML(_:)))
-        importXML.toolTip = "Import a sales XML file (e.g. produced by an assisted browser crawl) and apply matching offers to your list."
-        importXML.frame = NSRect(x: 218, y: 17, width: 135, height: 32); importXML.bezelStyle = .rounded; panel.contentView?.addSubview(importXML)
-        let clear = NSButton(title: "Clear All", target: self, action: #selector(clearCoupons(_:)))
-        clear.frame = NSRect(x: 360, y: 17, width: 115, height: 32); clear.bezelStyle = .rounded; panel.contentView?.addSubview(clear)
-        let apply = NSButton(title: "Apply & Close", target: self, action: #selector(saveCoupons(_:)))
-        apply.frame = NSRect(x: 515, y: 17, width: 145, height: 32); apply.bezelStyle = .rounded; apply.keyEquivalent = "\r"; panel.contentView?.addSubview(apply)
+        let clear = NSButton(title: "Clear Imported Deals", target: self, action: #selector(clearCoupons(_:)))
+        clear.frame = NSRect(x: 24, y: 16, width: 185, height: 32)
+        clear.bezelStyle = .rounded
+        panel.contentView?.addSubview(clear)
+
+        let close = NSButton(title: "Close", target: self, action: #selector(saveCoupons(_:)))
+        close.frame = NSRect(x: 441, y: 16, width: 95, height: 32)
+        close.bezelStyle = .rounded
+        panel.contentView?.addSubview(close)
+
         couponsPanel = panel
         panel.makeKeyAndOrderFront(nil)
     }
@@ -2114,8 +2121,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             couponValues.removeValue(forKey: id)
             couponLimits.removeValue(forKey: id)
             couponSources.removeValue(forKey: id)
-            couponFields[id]?.stringValue = ""
-            couponFields[id]?.toolTip = nil
         }
         for match in matches {
             guard match.savingsPerPackage > 0 else { continue }
@@ -2126,8 +2131,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 couponValues[match.itemID] = min(250, match.savingsPerPackage)
                 couponLimits[match.itemID] = max(1, match.maximumUses)
                 couponSources[match.itemID] = match.store
-                couponFields[match.itemID]?.stringValue = String(format: "%.2f", match.savingsPerPackage)
-                couponFields[match.itemID]?.toolTip = "Official \(match.store) offer; limit \(match.maximumUses) package(s)"
             }
         }
         persistCoupons()
@@ -2174,31 +2177,141 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
 
 
-    /// The control panel is a small local web app that drives the Claude for
-    /// Chrome extension and writes the sales XML this app imports.
-    @objc func openControlPanel(_ sender: Any?) {
-        let url = URL(string: AppDelegate.controlPanelURL)!
-        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 2)
-        request.httpMethod = "HEAD"
+    /// True when something is already serving on the control panel's port.
+    private var controlPanelIsRunning: Bool {
+        guard let url = URL(string: AppDelegate.controlPanelURL) else { return false }
+        // GET, not HEAD: a plain http.server answers HEAD with 501, which made
+        // this report "not running" against a panel that was serving fine.
+        var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 1.5)
+        request.httpMethod = "GET"
+        let semaphore = DispatchSemaphore(value: 0)
+        var ok = false
         URLSession.shared.dataTask(with: request) { _, response, _ in
-            let running = (response as? HTTPURLResponse)?.statusCode == 200
-            DispatchQueue.main.async {
-                if running {
-                    NSWorkspace.shared.open(url)
-                    self.couponScanStatus?.stringValue = "Opened the control panel. Press Scan with Claude there, then Import Sales XML here."
+            ok = (response as? HTTPURLResponse)?.statusCode == 200
+            semaphore.signal()
+        }.resume()
+        _ = semaphore.wait(timeout: .now() + 2)
+        return ok
+    }
+
+    /// Finds panel.py. Checked in order: a folder the user picked before, then
+    /// beside the app, then the usual places a download or clone ends up.
+    private func locateControlPanel() -> URL? {
+        var candidates: [URL] = []
+        if let saved = UserDefaults.standard.string(forKey: "controlPanelDirectory") {
+            candidates.append(URL(fileURLWithPath: saved))
+        }
+        let bundle = Bundle.main.bundleURL.deletingLastPathComponent()
+        candidates.append(bundle)
+        candidates.append(bundle.appendingPathComponent("deal-crawler"))
+        candidates.append(bundle.deletingLastPathComponent().appendingPathComponent("deal-crawler"))
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        for root in ["Downloads", "Documents", "dev", ""] {
+            let base = root.isEmpty ? home : home.appendingPathComponent(root)
+            for name in ["wellness-smart-shopping", "deal-crawler",
+                         "Wellness-Shopper/deal-crawler",
+                         "wellness-smart-shopping/deal-crawler"] {
+                candidates.append(base.appendingPathComponent(name))
+            }
+        }
+        for dir in candidates {
+            let script = dir.appendingPathComponent("panel.py")
+            if FileManager.default.fileExists(atPath: script.path) { return script }
+        }
+        return nil
+    }
+
+    /// Asks the user to point at the folder once, then remembers it.
+    private func askForControlPanelFolder() -> URL? {
+        let open = NSOpenPanel()
+        open.canChooseDirectories = true
+        open.canChooseFiles = false
+        open.allowsMultipleSelection = false
+        open.prompt = "Use This Folder"
+        open.message = "Where is the Wellness Smart Shopping folder? (the one containing panel.py)"
+        guard open.runModal() == .OK, let dir = open.url else { return nil }
+        let script = dir.appendingPathComponent("panel.py")
+        guard FileManager.default.fileExists(atPath: script.path) else {
+            let alert = NSAlert()
+            alert.messageText = "That folder has no panel.py"
+            alert.informativeText = "Pick the folder that contains panel.py."
+            alert.runModal()
+            return nil
+        }
+        UserDefaults.standard.set(dir.path, forKey: "controlPanelDirectory")
+        return script
+    }
+
+    private func setControlPanelBusy(_ busy: Bool, _ message: String) {
+        DispatchQueue.main.async {
+            self.couponScanStatus?.stringValue = message
+            if busy {
+                self.controlPanelSpinner?.startAnimation(nil)
+                self.controlPanelButton?.isEnabled = false
+            } else {
+                self.controlPanelSpinner?.stopAnimation(nil)
+                self.controlPanelButton?.isEnabled = true
+            }
+        }
+    }
+
+    /// Starts the control panel and opens it, reporting progress as it goes.
+    /// The panel is stopped again when this app quits.
+    @objc func openControlPanel(_ sender: Any?) {
+        guard let url = URL(string: AppDelegate.controlPanelURL) else { return }
+
+        if controlPanelIsRunning {
+            NSWorkspace.shared.open(url)
+            setControlPanelBusy(false, "Control panel is already running - opened it in your browser.")
+            return
+        }
+
+        guard let script = locateControlPanel() ?? askForControlPanelFolder() else {
+            setControlPanelBusy(false, "Could not find panel.py. Choose the folder that contains it and try again.")
+            return
+        }
+
+        setControlPanelBusy(true, "Starting the control panel...")
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/env")
+        process.arguments = ["python3", script.path, "--no-open"]
+        process.currentDirectoryURL = script.deletingLastPathComponent()
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        do {
+            try process.run()
+        } catch {
+            setControlPanelBusy(false, "Could not start it: \(error.localizedDescription). Is python3 installed?")
+            return
+        }
+        controlPanelProcess = process
+
+        // Wait for it to answer rather than opening a browser on a dead port.
+        DispatchQueue.global(qos: .userInitiated).async {
+            for attempt in 1...20 {
+                Thread.sleep(forTimeInterval: 0.5)
+                if !process.isRunning {
+                    self.setControlPanelBusy(false, "The control panel stopped while starting up. Try running python3 panel.py in that folder to see why.")
+                    self.controlPanelProcess = nil
                     return
                 }
-                let alert = NSAlert()
-                alert.messageText = "The control panel is not running"
-                alert.informativeText = "Start it first, then try again:\n\n  \u{2022} Double-click \u{201C}Start Panel.command\u{201D} in the wellness-smart-shopping folder, or\n  \u{2022} run  python3 panel.py  in that folder.\n\nIt opens at \(AppDelegate.controlPanelURL)."
-                alert.addButton(withTitle: "Copy the Command")
-                alert.addButton(withTitle: "OK")
-                if alert.runModal() == .alertFirstButtonReturn {
-                    NSPasteboard.general.clearContents()
-                    NSPasteboard.general.setString("python3 panel.py", forType: .string)
+                if self.controlPanelIsRunning {
+                    DispatchQueue.main.async { NSWorkspace.shared.open(url) }
+                    self.setControlPanelBusy(false, "Control panel ready. Press Scan with Claude there, then import the file it writes. It closes when you quit this app.")
+                    return
                 }
+                self.setControlPanelBusy(true, "Waiting for the control panel to come up... (\(attempt * 5)/100)")
             }
-        }.resume()
+            self.setControlPanelBusy(false, "The control panel did not answer in time. Open \(AppDelegate.controlPanelURL) yourself, or run python3 panel.py in that folder.")
+        }
+    }
+
+    /// The panel is ours to clean up: stop it when the app goes away.
+    func stopControlPanel() {
+        guard let process = controlPanelProcess, process.isRunning else { return }
+        process.terminate()
+        controlPanelProcess = nil
     }
 
     @objc func importSalesXML(_ sender: Any?) {
@@ -2223,7 +2336,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     @objc func clearCoupons(_ sender: Any?) {
-        for field in couponFields.values { field.stringValue = "" }
         couponValues.removeAll()
         couponLimits.removeAll()
         couponSources.removeAll()
@@ -2231,24 +2343,18 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         UserDefaults.standard.removeObject(forKey: "couponLimitsByItem")
         UserDefaults.standard.removeObject(forKey: "couponSourcesByItem")
         updateCouponsButton()
-        couponScanStatus?.stringValue = "All coupon values and found-offer limits were cleared."
-        status.stringValue = "Coupons cleared. New reports will use regular estimated prices."
+        couponScanStatus?.stringValue = "Imported deals cleared."
+        status.stringValue = "Deals cleared. New reports will use regular estimated prices."
     }
 
+    /// Closes the panel. Imported deals are already saved, so there is nothing
+    /// to gather here -- the per-item fields this used to read are gone.
     @objc func saveCoupons(_ sender: Any?) {
-        var saved: [String: Double] = [:]
-        for (id, field) in couponFields {
-            if let value = Double(field.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)), value > 0 {
-                saved[id] = min(250, value)
-            }
-        }
-        couponValues = saved
-        couponLimits = couponLimits.filter { saved[$0.key] != nil }
-        couponSources = couponSources.filter { saved[$0.key] != nil }
-        persistCoupons()
         couponsPanel?.orderOut(nil)
-        let perPackage = saved.values.reduce(0, +)
-        status.stringValue = "Applied \(saved.count) saved coupon(s). Entered per-package savings total \(money(perPackage)); actual plan savings depend on selected quantities."
+        let count = couponValues.values.filter { $0 > 0 }.count
+        guard count > 0 else { return }
+        let perPackage = couponValues.values.reduce(0, +)
+        status.stringValue = "\(count) imported deal\(count == 1 ? "" : "s") in effect, \(money(perPackage)) per package; actual savings depend on quantities."
     }
 
     @objc func checkInformation(_ sender: Any?) {

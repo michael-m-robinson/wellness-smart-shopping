@@ -176,7 +176,8 @@ The easiest way to use this. One command:
 python3 panel.py
 ```
 
-or double-click **Start Panel.command**. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
+or double-click **Start Panel.command** -- or just press **Scan with
+Claude...** in the desktop app, which starts it for you. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
 - **Scan with Claude** -- pick a store, Claude reads its deals from the page
@@ -263,11 +264,18 @@ its own scraper: it fetched store pages, parsed them, and kept sign-in sessions
 in an embedded browser. That is ~380 lines lighter now, and with it went the
 hard-coded town and store branch the original was built around.
 
-In its place the app has one button, **Scan with Claude...**, which opens the
-deals panel. From there you can **Open Control Panel** (it checks whether the
-panel is running and tells you how to start it if not) and **Import Sales
-XML...** to apply the file a scan produced. Scanning itself happens in the
-control panel, where the Claude for Chrome extension lives.
+In its place the app has one button, **Scan with Claude...**, opening a small
+panel that does three things and nothing else:
+
+- **Start Control Panel** finds `panel.py`, starts it, shows progress while it
+  comes up, opens your browser on it, and **stops it again when you quit the
+  app**. If it cannot find the folder it asks you to point at it once, then
+  remembers. Nothing to run by hand.
+- **Import Sales XML...** applies the file a scan produced.
+- **Clear Imported Deals**, and Close.
+
+The per-item list of entry boxes is gone -- deals arrive from a scan, so there
+was nothing left to type into it.
 
 What survived untouched: the meal planner, recipes, PDF export, nutrition
 targets, and the XML import. The app's own self-test still passes:

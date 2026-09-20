@@ -946,6 +946,16 @@ class Handler(BaseHTTPRequestHandler):
             }), "application/json")
         return self._send(404, b"not found", "text/plain")
 
+    def do_HEAD(self):
+        """Answer HEAD so a readiness probe sees 200 rather than a 501."""
+        path = self.path.split("?")[0]
+        known = (path in ("/", "/index.html", "/api/state")
+                 or path.startswith("/themes/"))
+        self.send_response(200 if known else 404)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def do_POST(self):
         path = self.path.split("?")[0]
         length = int(self.headers.get("Content-Length") or 0)
