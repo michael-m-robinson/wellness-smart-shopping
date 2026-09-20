@@ -294,15 +294,21 @@ Twenty-six images ship with the project, in two kinds:
 - **Six drawn by code** (`tools/make_themes.py`) -- abstract produce artwork that
   carries no third-party licence at all.
 - **Twenty photographs** -- retro 1950s grocery scenes, training and strength,
-  open air and green space, and a family at the table.
+  open air and green space, and a family at the table. These are AI-generated,
+  commissioned for this project and contributed under the same MIT terms, so
+  they carry no third-party claim and depict no real person.
+
+Provenance and licensing for both kinds is recorded in
+[themes/CREDITS.md](themes/CREDITS.md).
 
 Pick one in the control panel and it becomes the banner; `personalize.py` can
 push the same image into the desktop app. Drop any `.png` or `.jpg` into
 `themes/` and it appears in the picker too. The grid loads small thumbnails
 from `themes/thumbs/` so a large library stays quick.
 
-Good sources for more free photography are Unsplash, Pexels, Openverse and
-Wikimedia Commons -- check each image's licence before redistributing it.
+If you add an image you did not make, check its licence before redistributing
+it -- Unsplash, Pexels, Openverse and Wikimedia Commons are good sources, but
+their terms vary image by image.
 
 ### Your shopping list message
 
