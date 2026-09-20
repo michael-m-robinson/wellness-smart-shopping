@@ -218,5 +218,30 @@ class TestScanDirections(unittest.TestCase):
             self.assertIn(needle, html_out)
 
 
+class TestRetireAppButtons(unittest.TestCase):
+    """The binary patch is only safe while every replacement fits the original
+    byte-for-byte -- Swift keeps the literal's length as a code immediate."""
+
+    def test_replacements_never_exceed_the_original(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        for original, replacement in r.RETIREMENTS:
+            self.assertLessEqual(len(replacement), len(original),
+                                 msg=replacement[:40])
+
+    def test_padding_restores_the_exact_length(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        for original, replacement in r.RETIREMENTS:
+            padded = replacement + b" " * (len(original) - len(replacement))
+            self.assertEqual(len(padded), len(original))
+
+    def test_replacements_point_at_the_control_panel(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        joined = b" ".join(rep for _, rep in r.RETIREMENTS).lower()
+        self.assertIn(b"control panel", joined)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

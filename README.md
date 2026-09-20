@@ -157,10 +157,35 @@ Your password never leaves the store's own site -- scanning only reads the
 visible text of a page you already opened. If you are signed out,
 `harvest.js` says so rather than handing back an empty list.
 
-> **Ignore the desktop app's own coupon button.** The bundled app has an older
-> built-in "Find Official Offers" / Connect Account panel that predates this
-> project. Scanning here replaces it: it handles more stores, honours purchase
-> limits, and writes a file the app imports directly.
+### Retiring the app's old coupon button
+
+The bundled desktop app carries an older built-in "Find Official Offers" /
+Connect Account panel that predates this project. Scanning replaces it: it
+handles more stores, honours purchase limits, and writes a file the app imports
+directly.
+
+The app is a compiled binary with no source, so that button cannot be deleted --
+deleting it means changing code, and there is no code to change. It can,
+however, be **relabelled in place** so nobody walks into the dead end:
+
+```bash
+python3 tools/retire_app_buttons.py --app "/Applications/Your App.app" --dry-run
+python3 tools/retire_app_buttons.py --app "/Applications/Your App.app"
+```
+
+"Find Official Offers" becomes "Use Control Panel", and the panel's help text
+points at `panel.py` > How to Scan. This is a byte-for-byte, same-length edit of
+string data only -- Swift stores a literal's length as an instruction immediate,
+so a replacement of identical length cannot shift the binary's layout. The tool
+backs the binary up outside the bundle first, re-signs afterwards so macOS still
+opens the app, and undoes itself:
+
+```bash
+python3 tools/retire_app_buttons.py --app "..." --restore "<the .bak file>"
+```
+
+macOS only. The button still exists and still works -- it is now signposted
+rather than removed. Removing it outright needs the app rebuilt from source.
 
 ### Make it sound like you
 
