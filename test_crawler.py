@@ -251,6 +251,30 @@ class TestRetireAppButtons(unittest.TestCase):
             padded = replacement + b" " * (len(original) - len(replacement))
             self.assertEqual(len(padded), len(original))
 
+    def test_neutering_covers_every_scrape_target(self):
+        """Relabelling alone left the coupon engine fetching store pages."""
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        self.assertTrue(r.SCRAPE_URLS)
+        for url in r.SCRAPE_URLS:
+            self.assertLessEqual(len(r.BLANK), len(url), url)
+            self.assertTrue(url.startswith(b"http"), url)
+
+    def test_scraper_text_replacements_fit(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        for original, replacement in r.SCRAPER_TEXT:
+            self.assertLessEqual(len(replacement), len(original), replacement)
+
+    def test_neutering_can_be_opted_out_of(self):
+        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
+        import retire_app_buttons as r
+        sample = b"x" * 400 + b"https://www.bjs.com/deals" + b"y" * 400
+        with_neuter = dict(r.build_rules(sample, neuter=True))
+        without = dict(r.build_rules(sample, neuter=False))
+        self.assertIn(b"https://www.bjs.com/deals", with_neuter)
+        self.assertNotIn(b"https://www.bjs.com/deals", without)
+
     def test_replacements_point_at_the_control_panel(self):
         sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
         import retire_app_buttons as r

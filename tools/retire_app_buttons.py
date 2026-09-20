@@ -6,11 +6,17 @@ Offers" / coupon-import panel. That flow is superseded by the control panel,
 but the app ships as a compiled binary with no source, so the button cannot be
 deleted -- deleting it means changing code, and there is no code to change.
 
-What *can* be done safely is relabelling it in place. Swift keeps a string
-literal's length as an immediate in the instruction stream and the bytes in
-__TEXT,__cstring, so a replacement of exactly the same byte length is a safe,
-layout-preserving edit: the worst case is odd-looking text, never a crash.
-Replacements shorter than the original are padded with spaces to match.
+Two things can be done safely from outside the binary.
+
+Relabelling it in place: Swift keeps a string literal's length as an immediate
+in the instruction stream and the bytes in __TEXT,__cstring, so a replacement of
+exactly the same byte length is a layout-preserving edit -- the worst case is
+odd-looking text, never a crash. Shorter replacements are space-padded to match.
+
+Neutering it: relabelling alone leaves the coupon engine running, so a button
+reading "Scan with Claude" still fetched and scraped store pages. Pointing its
+scrape targets at about:blank makes the retired feature genuinely inert rather
+than misleadingly alive. Pass --keep-scraper to relabel without this.
 
     python3 tools/retire_app_buttons.py --app "/Applications/Your App.app"
     python3 tools/retire_app_buttons.py --app ... --restore
@@ -75,6 +81,36 @@ PREFIX_RULES = [
      b"store with Claude instead, then use Import Sales XML below."),
 ]
 
+# --- neutering --------------------------------------------------------------
+# Relabelling alone leaves the coupon engine running: the buttons still fetch
+# store pages and scrape them. Pointing its scrape targets at about:blank makes
+# the retired feature genuinely inert instead of misleadingly alive. The item
+# source links in the price book are deliberately left alone.
+SCRAPE_URLS = [
+    b"https://www.bjs.com/deals",
+    b"https://www.costco.com/o/-/warehouse-savings",
+    b"https://stewleonards.com/stews-flyer/",
+    b"https://www.shoprite.com/",
+]
+BLANK = b"about:blank"
+
+# Status text from the scraper, so a dead feature reads as dead.
+SCRAPER_TEXT = [
+    (b"Check ShopRite Web Sales", b"Retired"),
+    (b"Finding this week's ShopRite deals page...",
+     b"Retired - use the control panel"),
+    (b"Scanned the ShopRite deals page but nothing mapped to your shopping list "
+     b"this week.",
+     b"Retired. Run 'python3 panel.py' and press Scan with Claude."),
+    (b"No items mapped to your list on this page. Scroll to the deals section, "
+     b"then Scan Sales again.",
+     b"Retired. Scanning now happens in the control panel: python3 panel.py"),
+    (b"This week's public ShopRite deals. Once it finishes loading, choose Scan "
+     b"Sales to read the advertised prices (not card-clip coupons).",
+     b"Retired. This page no longer loads. Run 'python3 panel.py', press Scan "
+     b"with Claude, and import the file it writes."),
+]
+
 # --- pattern rules ----------------------------------------------------------
 # Store pickers in the original build are labelled with real branch addresses.
 # Anyone handed the app would be reading a stranger's neighbourhood, so these
@@ -102,9 +138,13 @@ def _printable_strings(data: bytes):
         yield m.start(), m.group(0)
 
 
-def build_rules(data: bytes):
+def build_rules(data: bytes, neuter: bool = True):
     """Exact rules, plus any prefix/pattern matches found in this binary."""
     rules = list(RETIREMENTS)
+    if neuter:
+        rules.extend(SCRAPER_TEXT)
+        for url in SCRAPE_URLS:
+            rules.append((url, BLANK))
     for prefix, replacement in PREFIX_RULES:
         idx = data.find(prefix)
         if idx < 0:
@@ -155,6 +195,8 @@ def main(argv=None):
     ap.add_argument("--app", required=True, help="path to the .app bundle")
     ap.add_argument("--restore", metavar="BACKUP",
                     help="restore the binary from a backup taken earlier")
+    ap.add_argument("--keep-scraper", action="store_true",
+                    help="relabel only; leave the old coupon scraper working")
     ap.add_argument("--dry-run", action="store_true")
     args = ap.parse_args(argv)
 
@@ -175,7 +217,7 @@ def main(argv=None):
     data = bytearray(open(exe, "rb").read())
     changes, missing = [], []
 
-    for original, replacement in build_rules(bytes(data)):
+    for original, replacement in build_rules(bytes(data), neuter=not args.keep_scraper):
         if len(replacement) > len(original):
             print(f"  ! replacement longer than original, skipping: "
                   f"{replacement[:40]!r}", file=sys.stderr)
@@ -185,12 +227,15 @@ def main(argv=None):
             # Already patched, or a build that never had this string.
             missing.append(original[:46].decode(errors="replace"))
             continue
-        if data.count(original) != 1:
-            print(f"  ! {original[:40]!r} appears more than once; skipping")
-            continue
         padded = replacement + b" " * (len(original) - len(replacement))
         assert len(padded) == len(original)
-        changes.append((idx, original, padded))
+        start = 0
+        while True:
+            at = data.find(original, start)
+            if at < 0:
+                break
+            changes.append((at, original, padded))
+            start = at + len(original)
 
     for text in missing:
         print(f"  - not found (already retired?): {text}...")

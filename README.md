@@ -176,7 +176,7 @@ The easiest way to use this. One command:
 python3 panel.py
 ```
 
-It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
+or double-click **Start Panel.command**. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
 - **Scan with Claude** -- pick a store, Claude reads its deals from the page
@@ -246,36 +246,45 @@ would rather read them first.
 ### Retiring the app's old coupon panel
 
 The bundled desktop app carries a built-in coupon finder that predates this
-project -- "Find & Apply Coupons", Connect Account, Scan All Offers. It is
-retired: scanning replaces it, handles more stores, honours purchase limits,
-and writes a file the app imports directly.
+project. It is retired: scanning replaces it, handles more stores, honours
+purchase limits, and writes a file the app imports directly.
 
 The app is a compiled binary with no source, so the button cannot be deleted --
-deleting it means changing code, and there is no code to change. It can,
-however, be **relabelled in place**, and its panel turned into scanning
-directions:
+deleting it means changing code, and there is no code to change. Two things can
+be done from outside it:
 
 ```bash
 python3 tools/retire_app_buttons.py --app "/Applications/Your App.app" --dry-run
 python3 tools/retire_app_buttons.py --app "/Applications/Your App.app"
 ```
 
-"Find & Apply Coupons..." becomes **"Scan with Claude..."**, and the panel
-behind it points at `panel.py`. This is a byte-for-byte, same-length edit of
-string data only -- Swift stores a literal's length as an instruction immediate,
-so a replacement of identical length cannot shift the binary's layout. The tool
-backs the binary up outside the bundle, re-signs afterwards so macOS still opens
-the app, and undoes itself:
+**It relabels.** "Find & Apply Coupons..." becomes "Scan with Claude...", and the
+panel behind it points at the control panel. This is a byte-for-byte,
+same-length edit of string data only -- Swift stores a literal's length as an
+instruction immediate, so a replacement of identical length cannot shift the
+binary's layout.
+
+**It neuters.** Relabelling alone is not enough: the coupon engine is live code,
+so a button reading "Scan with Claude" still fetched and scraped store pages
+behind your back. Its scrape targets are repointed at `about:blank`, which makes
+the retired feature genuinely inert instead of misleadingly alive. Pass
+`--keep-scraper` to relabel without this.
+
+**It scrubs personal data.** The original build hard-coded one household's town
+and store branch in its store picker. Those are matched structurally and
+replaced with neutral labels, so nobody is handed a stranger's neighbourhood.
+
+A timestamped backup is taken outside the bundle, the bundle is re-signed so
+macOS still opens it, and the whole thing undoes itself:
 
 ```bash
 python3 tools/retire_app_buttons.py --app "..." --restore "<the .bak file>"
 ```
 
-The same run also **scrubs personal data** from the binary. The original build
-hard-coded one household's town and store branch in its store picker; those are
-matched structurally and replaced with neutral labels, so nobody is handed a
-stranger's neighbourhood. It also stops the app reaching third-party coupon
-blogs.
+> **The scan flow lives in the control panel, not in the app.** The app's own
+> window is the retired thing: it can import the XML, but it cannot scan. Run
+> `python3 panel.py` (or double-click **Start Panel.command**) and press **Scan
+> with Claude** there.
 
 > **If the button still shows a count** -- "Coupons (3)..." -- that title is
 > built at runtime and cannot be patched. Clear the saved coupon values in the
