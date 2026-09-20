@@ -81,7 +81,7 @@ with no browser and no subscription involved.
 ## Install
 
 ```bash
-git clone https://github.com/<your-account>/store-deal-crawler.git
+git clone https://github.com/michael-m-robinson/store-deal-crawler.git
 cd store-deal-crawler
 cp config.example.json config.json
 ```
