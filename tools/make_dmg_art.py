@@ -19,7 +19,10 @@ from make_icon import content_bounds, crop, read_png  # noqa: E402
 WIDTH, HEIGHT = 700, 460
 # The gap between the two icons, in the window's own coordinates.
 ARROW_CENTRE = (349, 196)
-ARROW_WIDTH = 168
+# Installer arrows are a hint between the icons, not a third object competing
+# with them: conventionally around two thirds of the icon size, so 96 against
+# the 128px icons here.
+ARROW_WIDTH = 96
 # Sampled from the icon: green on the left, blue on the right.
 GREEN = (0x3F, 0xB9, 0x8B)
 BLUE = (0x2E, 0x96, 0xD8)
