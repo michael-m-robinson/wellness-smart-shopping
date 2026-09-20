@@ -1,6 +1,6 @@
 <h1>Wellness Smart Shopping</h1>
 
-[![Version](https://img.shields.io/badge/version-1.0.0-3f7d4f)](https://github.com/michael-m-robinson/wellness-smart-shopping/releases)
+[![Version](https://img.shields.io/badge/version-1.1.0-3f7d4f)](https://github.com/michael-m-robinson/wellness-smart-shopping/releases)
 [![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-555)](#what-you-need)
 [![Desktop app](https://img.shields.io/badge/desktop%20app-macOS%2013%2B-000)](#the-companion-desktop-app)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776ab)](#what-you-need)
@@ -340,18 +340,18 @@ The line above your shopping list is yours. Pick one of the presets in
 
 It saves to `branding.json` with everything else.
 
-### Renaming and re-skinning the desktop app
+### Personalising a build you already have
 
-The desktop app's text is compiled in, but its name and its picture are not:
+Building from `app/` already bakes in your name and theme. To change an existing
+bundle without rebuilding:
 
 ```bash
 python3 personalize.py --list
-python3 personalize.py --name "Wellness Smart Shopping" --theme farm-market --icon
+python3 personalize.py --name "My Shopping App" --theme farm-market --icon
 ```
 
-This renames the bundle, swaps the picture the app displays, optionally rebuilds
-the icon, takes a timestamped backup first, and re-signs the bundle so macOS
-still opens it. macOS only.
+It renames the bundle, swaps the picture the app shows, optionally rebuilds the
+icon, backs up first, and re-signs so macOS still opens it. macOS only.
 
 ---
 
@@ -458,13 +458,12 @@ It appears in the control panel immediately, with its own scan directions and
 its own `harvest/mymarket.txt`. The matcher, price maths and XML writer are
 shared, so any store benefits from them.
 
-## The companion desktop app
+## The sales XML format
 
-The app's source is in `app/` and builds with `app/build.sh`. The XML format is
-documented in **[docs/XML-IMPORT.md](docs/XML-IMPORT.md)**,
-including the full list of catalog item IDs the importer accepts. The format is
-plain text and deliberately simple, so you can generate it from a spreadsheet,
-a script, or by hand — this crawler is just one producer.
+**[docs/XML-IMPORT.md](docs/XML-IMPORT.md)** documents the file the app imports,
+including the full list of catalog item IDs it accepts. The format is plain text
+and deliberately simple, so you can generate it from a spreadsheet, a script, or
+by hand -- this crawler is just one producer of it.
 
 ---
 
@@ -472,8 +471,9 @@ a script, or by hand — this crawler is just one producer.
 
 - 📱 **A mobile version is coming soon** -- the control panel is already a web
   app, which is the groundwork for it.
-- More store sources. Contributions welcome: a store is usually one small
-  parser and a URL.
+- More stores. Adding one needs no code at all -- a name and the pages worth
+  scanning, in `config.json`. Contributions welcome.
+- The desktop app builds from source in `app/`, so it is open to changes too.
 
 ---
 
