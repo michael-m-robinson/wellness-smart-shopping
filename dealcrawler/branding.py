@@ -33,10 +33,30 @@ DEFAULTS: Dict[str, str] = {
     "themes_header": "Choose a look",
     "output_header": "Files ready to import",
 
+    "scan_button": "How to Scan",
     "refresh_button": "Refresh Deals",
     "refresh_working": "Checking stores...",
     "import_button": "How to Import",
     "save_button": "Save",
+
+    "scan_title": "Scanning a store for deals",
+    "scan_intro": ("Stores show their real coupon list only to a signed-in "
+                   "browser. Scanning means reading that list from the page you "
+                   "already have open - no password ever leaves the store site."),
+    "scan_steps": [
+        "Sign in to the store in Chrome.",
+        "Open its weekly ad or digital coupon list and scroll once so every "
+        "offer loads.",
+        "Ask Claude, with the Claude for Chrome extension enabled: "
+        "\"run browser/harvest.js on this tab\".",
+        "Claude scrolls the whole list and prints one offer per line. Save that "
+        "to a text file.",
+        "Run the harvest command shown for that store below, then press "
+        "Refresh Deals.",
+    ],
+    "scan_note": ("If a page says you are signed out, sign in and open the "
+                  "coupon list again - harvest.js will tell you rather than "
+                  "return an empty list."),
 
     "import_title": "Importing into your shopping app",
     "import_steps": [
@@ -44,8 +64,8 @@ DEFAULTS: Dict[str, str] = {
         "Choose Import Sales XML... from the menu.",
         "Pick the newest file from the out/ folder listed below.",
         "The app re-prices your list and re-ranks recipes around the deals.",
-        "Clip any store-account coupons in your store account - the file tells "
-        "the app what a deal is worth, it cannot clip it for you.",
+        "Store-account coupons still need clipping in your store account - "
+        "the file tells the app what a deal is worth, it cannot clip it.",
     ],
     "import_note": "Advertised prices change. Always check your receipt.",
 

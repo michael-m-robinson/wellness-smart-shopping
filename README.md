@@ -116,6 +116,9 @@ It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
 - **Refresh Deals** -- checks every enabled store and writes the XML.
+- **How to Scan** -- step-by-step directions for reading a store's coupon list
+  from your signed-in browser, with the exact page to open and the exact
+  command to run, per store.
 - **How to Import** -- step-by-step import instructions in a popup.
 - **A sign-in panel** -- any store that needs an account is listed with a link
   to open it and instructions for the browser harvest.
@@ -126,6 +129,38 @@ nothing uploaded anywhere -- with:
 <p align="center"><img src="docs/img/control-panel.jpg" alt="The control panel: banner with a custom greeting, Refresh Deals and How to Import buttons, matched deals, and a theme picker" width="820"></p>
 
 <p align="center"><em>Refresh, see what matched, import. That's the loop.</em></p>
+
+### Scanning a store
+
+Some stores publish deals anyone can read; others show their real coupon list
+only to a signed-in browser. **How to Scan** in the control panel spells out
+which is which for your stores, and gives you the page link and command for
+each:
+
+<p align="center"><img src="docs/img/how-to-scan.jpg" alt="The How to Scan popup: five numbered steps, then a card per store showing whether it reads without signing in or needs sign-in, with links to its coupon list and weekly ad and the harvest command to run" width="720"></p>
+
+The short version:
+
+1. Sign in to the store in Chrome.
+2. Open its weekly ad or digital coupon list and scroll once so every offer loads.
+3. Ask Claude, with the Claude for Chrome extension enabled:
+   *"run browser/harvest.js on this tab"*.
+4. Claude scrolls the whole list and prints one offer per line. Save that to a
+   text file.
+5. Feed it back and refresh:
+
+```bash
+python3 crawl.py --harvest shoprite=offers.txt
+```
+
+Your password never leaves the store's own site -- scanning only reads the
+visible text of a page you already opened. If you are signed out,
+`harvest.js` says so rather than handing back an empty list.
+
+> **Ignore the desktop app's own coupon button.** The bundled app has an older
+> built-in "Find Official Offers" / Connect Account panel that predates this
+> project. Scanning here replaces it: it handles more stores, honours purchase
+> limits, and writes a file the app imports directly.
 
 ### Make it sound like you
 

@@ -103,6 +103,55 @@ def run_refresh(store_keys=None, refresh=True) -> dict:
             "when": datetime.datetime.now().strftime("%a %d %b, %H:%M")}
 
 
+# A store can expose more than one page worth opening (a coupon list and a
+# weekly ad), so label each link by what it actually opens.
+LINK_LABELS = (
+    ("digital-coupon", "Open the digital coupon list"),
+    ("weekly-ad", "Open the weekly ad"),
+    ("flyer", "Open the weekly flyer"),
+    ("warehouse-savings", "Open warehouse savings"),
+)
+
+
+def link_label(url: str, store: str) -> str:
+    for needle, label in LINK_LABELS:
+        if needle in url:
+            return label
+    return f"Open {store}"
+
+
+def scan_help() -> list:
+    """Per-store scanning directions, built from the stores actually enabled.
+
+    Each store says whether it can be read without signing in, and gives the
+    exact page to open and the exact command to run afterwards.
+    """
+    cfg = load_config()
+    out = []
+    for key, mod in SOURCES.items():
+        if not cfg.get("stores", {}).get(key, {}).get("enabled", True):
+            continue
+        store_cfg = cfg.get("stores", {}).get(key, {})
+        urls = (mod.signin_urls(store_cfg.get("store_id", "000"))
+                if hasattr(mod, "signin_urls") else [])
+        # A store with its own crawl() that does not need a browser is automatic.
+        public = key == "costco" or key == "shoprite"
+        out.append({
+            "key": key,
+            "store": mod.STORE,
+            "urls": [{"url": u, "label": link_label(u, mod.STORE)} for u in urls],
+            "public": public,
+            "public_note": ("Refresh Deals already reads this store's public "
+                            "deals. Scan it as well to pick up the coupons that "
+                            "only appear when you are signed in."
+                            if public else
+                            "This store can only be read from a signed-in "
+                            "browser, so it must be scanned."),
+            "command": f"python3 crawl.py --harvest {key}=offers.txt",
+        })
+    return out
+
+
 # ------------------------------------------------------------------ page
 def page() -> str:
     brand = branding.load()
@@ -111,6 +160,21 @@ def page() -> str:
     theme = brand.get("theme") or "farm-market"
     steps = brand.get("import_steps") or []
     steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in steps)
+    scan_steps = brand.get("scan_steps") or []
+    scan_steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in scan_steps)
+    stores_html = ""
+    for st in scan_help():
+        links = "".join(
+            f'<p><a href="{html.escape(u["url"])}" target="_blank" rel="noopener">'
+            f'{html.escape(u["label"])}</a></p>' for u in st["urls"])
+        badge = ('<span class="pill auto">reads without signing in</span>'
+                 if st["public"] else
+                 '<span class="pill need">needs sign-in</span>')
+        stores_html += (
+            f'<div class="store-help"><div class="sh-head"><strong>'
+            f'{html.escape(st["store"])}</strong>{badge}</div>'
+            f'<p class="muted">{html.escape(st["public_note"])}</p>{links}'
+            f'<code>{html.escape(st["command"])}</code></div>')
     themes_html = "".join(
         f'<button class="theme{" on" if t["name"] == theme else ""}" '
         f'data-theme="{html.escape(t["name"])}" title="{html.escape(t["description"])}">'
@@ -189,6 +253,14 @@ def page() -> str:
   dialog .inner{{padding:22px 24px}}
   dialog ol{{padding-left:20px;margin:0 0 14px}}
   dialog li{{margin-bottom:8px}}
+  .store-help{{border-top:1px solid var(--line);padding:12px 0}}
+  .store-help code{{display:block;margin-top:6px;font-size:.82rem;
+    background:var(--bg);padding:8px 10px;border-radius:8px;word-break:break-all}}
+  .sh-head{{display:flex;gap:8px;align-items:center;flex-wrap:wrap}}
+  .pill{{font-size:.72rem;font-weight:700;padding:2px 8px;border-radius:999px;
+    text-transform:uppercase;letter-spacing:.04em}}
+  .pill.auto{{background:#e3f1e6;color:#265c35}}
+  .pill.need{{background:var(--warn-bg);color:var(--warn)}}
   .spin{{display:inline-block;width:13px;height:13px;border:2px solid currentColor;
     border-right-color:transparent;border-radius:50%;animation:s .7s linear infinite;
     vertical-align:-1px;margin-right:7px}}
@@ -210,6 +282,7 @@ def page() -> str:
 
 <div class="row">
   <button class="primary" id="refresh">{g('refresh_button')}</button>
+  <button id="scan">{g('scan_button')}</button>
   <button id="howto">{g('import_button')}</button>
 </div>
 
@@ -241,6 +314,16 @@ def page() -> str:
 <p class="muted">{g('footer')}</p>
 </div>
 
+<dialog id="scandlg"><div class="inner">
+  <h2>{g('scan_title')}</h2>
+  <p class="muted">{g('scan_intro')}</p>
+  <ol>{scan_steps_html}</ol>
+  <h2 style="margin-top:18px">Your stores</h2>
+  {stores_html}
+  <div class="card warn" style="margin:14px 0 0">{g('scan_note')}</div>
+  <div class="row" style="margin:16px 0 0"><button class="primary" id="scanclose">Close</button></div>
+</div></dialog>
+
 <dialog id="dlg"><div class="inner">
   <h2>{g('import_title')}</h2>
   <ol>{steps_html}</ol>
@@ -257,6 +340,8 @@ const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c]));
 
+$("#scan").onclick = () => $("#scandlg").showModal();
+$("#scanclose").onclick = () => $("#scandlg").close();
 $("#howto").onclick = () => $("#dlg").showModal();
 $("#close").onclick = () => $("#dlg").close();
 

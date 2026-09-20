@@ -184,5 +184,39 @@ class TestPanel(unittest.TestCase):
         self.assertTrue(all(ord(c) < 128 for c in panel.page()))
 
 
+class TestScanDirections(unittest.TestCase):
+    """The scan popup replaces the desktop app's old coupon button, so its
+    per-store directions have to be real and complete."""
+
+    def test_every_enabled_store_gets_directions(self):
+        import panel
+        keys = {s["key"] for s in panel.scan_help()}
+        self.assertTrue({"shoprite", "stews", "costco"} <= keys)
+
+    def test_each_store_has_a_runnable_command(self):
+        import panel
+        for st in panel.scan_help():
+            self.assertIn(f"--harvest {st['key']}=", st["command"])
+
+    def test_login_walled_store_is_marked(self):
+        import panel
+        stews = next(s for s in panel.scan_help() if s["key"] == "stews")
+        self.assertFalse(stews["public"])
+
+    def test_links_are_labelled_by_purpose(self):
+        import panel
+        shoprite = next(s for s in panel.scan_help() if s["key"] == "shoprite")
+        labels = [u["label"] for u in shoprite["urls"]]
+        # Two ShopRite pages, so the labels must distinguish them.
+        self.assertEqual(len(labels), len(set(labels)))
+        self.assertIn("Open the digital coupon list", labels)
+
+    def test_panel_renders_the_scan_dialog(self):
+        import panel
+        html_out = panel.page()
+        for needle in ('id="scan"', 'id="scandlg"', "Your stores"):
+            self.assertIn(needle, html_out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)
