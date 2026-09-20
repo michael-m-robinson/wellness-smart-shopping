@@ -801,8 +801,18 @@ class TestInstaller(unittest.TestCase):
         self.assertIn("OUR_IDENTIFIER_PREFIX", self.src)
         self.assertIn("def bundle_identifier", self.src)
 
-    def test_build_output_is_not_counted_as_a_copy(self):
-        self.assertIn('os.path.join("app", "build") in path', self.src)
+    def test_build_output_counts_as_a_copy(self):
+        """It was excluded once as 'only what we install from', and showed up
+        as a second entry in Launchpad. macOS indexes it like any other app."""
+        self.assertIn('roots.append(os.path.join(HERE, "app", "build"))', self.src)
+        self.assertNotIn('os.path.join("app", "build") in path', self.src)
+
+    def test_removals_deregister_from_launchservices(self):
+        """Deleting the files alone leaves a ghost in Launchpad and Spotlight."""
+        self.assertIn("def unregister", self.src)
+        self.assertIn("lsregister", self.src)
+        removals = self.src.count("unregister(")
+        self.assertGreaterEqual(removals, 4, "every removal path should deregister")
 
     def test_older_builds_are_not_removed_by_default(self):
         """Someone else's original app is theirs to keep."""

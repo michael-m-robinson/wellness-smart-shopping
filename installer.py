@@ -193,6 +193,17 @@ SEARCH_ROOTS = ["/Applications", "~/Applications", "~/Desktop", "~/Downloads",
                 "~/dev", "~/Documents"]
 
 
+LSREGISTER = ("/System/Library/Frameworks/CoreServices.framework/Frameworks"
+              "/LaunchServices.framework/Support/lsregister")
+
+
+def unregister(app):
+    """Drop it from LaunchServices too, or macOS keeps offering the ghost in
+    Launchpad, Spotlight and Open With long after the files are gone."""
+    if os.path.exists(LSREGISTER):
+        subprocess.run([LSREGISTER, "-u", app], capture_output=True)
+
+
 def bundle_identifier(app):
     try:
         with open(os.path.join(app, "Contents", "Info.plist"), "rb") as fh:
@@ -202,10 +213,17 @@ def bundle_identifier(app):
 
 
 def find_installed_copies():
-    """Every copy on this machine: (path, identifier, is_ours)."""
+    """Every copy on this machine: (path, identifier, is_ours).
+
+    The staging copy under app/build counts. It was excluded once on the
+    grounds that it is only what we install *from* -- but macOS indexes it like
+    any other app, so it showed up as a second entry in Launchpad. If it is on
+    disk, it is a copy.
+    """
     found = {}
     roots = [os.path.expanduser(r) for r in SEARCH_ROOTS]
     roots.append(os.path.dirname(HERE))
+    roots.append(os.path.join(HERE, "app", "build"))
     for root in roots:
         if not os.path.isdir(root):
             continue
@@ -217,9 +235,6 @@ def find_installed_copies():
                 if not name.endswith(".app"):
                     continue
                 path = os.path.realpath(os.path.join(dirpath, name))
-                # Skip the build output: it is what we install *from*.
-                if os.path.join("app", "build") in path:
-                    continue
                 ident = bundle_identifier(path)
                 if ident.startswith(OUR_IDENTIFIER_PREFIX):
                     found[path] = (ident, True)
@@ -251,6 +266,7 @@ def step_one_copy(step, total):
         elif ask(f"Remove {len(extras)} duplicate cop{'y' if len(extras) == 1 else 'ies'}? "
                  f"(the one in Applications is kept)", default=True):
             for path in extras:
+                unregister(path)
                 shutil.rmtree(path, ignore_errors=True)
                 report(OK, "removed", path)
     elif extras:
@@ -264,6 +280,7 @@ def step_one_copy(step, total):
             report(WARN, "older build", path)
         if not state["check_only"] and ask("Remove those too?", default=False):
             for path, _ in legacy:
+                unregister(path)
                 shutil.rmtree(path, ignore_errors=True)
                 report(OK, "removed", path)
     return True
@@ -378,6 +395,7 @@ def step_build(step, total):
         state["installed_app"] = target
         # The build output is only a staging copy; leaving it behind is how
         # you end up with two apps and no idea which one you just opened.
+        unregister(app)
         shutil.rmtree(app, ignore_errors=True)
         report(OK, "build output cleared", "so only the installed copy remains")
     return True

@@ -391,10 +391,19 @@ python3 installer.py --check     # report only, changes nothing
 **One copy, always.** The app is installed to `~/Applications` and the wizard
 removes any other copy of it -- two installed copies is a trap where you open
 one, find the old build, and none of your changes are there. Copies are matched
-by bundle identifier rather than name, so renaming a build with `build.sh`
-does not sneak a second one past it, and the staging copy under `app/build/` is
-cleared once it has been installed. Older builds of the *original* app are
-listed but never removed unless you say so -- they are yours.
+by bundle identifier rather than name, so renaming a build with `build.sh` does
+not sneak one past it, and that includes the staging copy `build.sh` leaves in
+`app/build/`: macOS indexes it like any other app, so it appears in Launchpad
+whether or not you think of it as installed. Removals are deregistered from
+LaunchServices too, or the ghost lingers in Launchpad and Spotlight after the
+files are gone. Older builds of the *original* app are listed but never removed
+unless you say so -- they are yours.
+
+If you have built the app by hand and want to tidy up without reinstalling:
+
+```bash
+python3 installer.py --check     # shows every copy it can find
+```
 
 > **There are no Python packages to install.** The crawler, the control panel
 > and the wizard are standard library only, and the desktop app uses Apple's own
