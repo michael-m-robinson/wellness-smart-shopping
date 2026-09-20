@@ -1,0 +1,18 @@
+{
+  "_comment": "Copy to config.json and set your own stores. Nothing here is personal by default.",
+  "stores": {
+    "shoprite": {
+      "enabled": true,
+      "store_id": "000",
+      "_store_id_help": "Open shoprite.com, choose your store, and copy the number from the URL .../rsid/<store_id>/..."
+    },
+    "stews": {
+      "enabled": true
+    },
+    "costco": {
+      "enabled": true
+    }
+  },
+  "per_weight": "convert",
+  "snack_twins": true
+}

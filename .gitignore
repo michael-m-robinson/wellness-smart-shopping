@@ -1,0 +1,14 @@
+# Local configuration: contains your own store numbers
+config.json
+
+# Fetched store pages and generated output
+cache/
+out/
+
+# Harvested browser text
+*.harvest.txt
+offers.txt
+
+__pycache__/
+*.pyc
+.DS_Store

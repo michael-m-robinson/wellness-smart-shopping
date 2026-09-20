@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Tests: python3 test_crawler.py"""
+import os
+import sys
+import unittest
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+
+from dealcrawler.catalog import BY_ID, ITEMS, VALID_IDS
+from dealcrawler.matcher import match
+from dealcrawler.offers import Offer, dedupe, extract, mirror_twins, parse_limit
+from dealcrawler.xmlout import render, safe_note, validate
+
+# The exact item IDs the Smart Shopping List importer accepts. An offer using
+# any other ID is silently discarded by the app, so this list is load-bearing.
+APP_CATALOG_IDS = {
+    "beans", "beef", "blackpepper", "blueberries", "bread", "broth", "chia",
+    "chicken", "cinnamon", "cod", "cottage", "cumin", "dinnerveg", "eggs",
+    "feta", "fruit", "garlicpowder", "greens", "hummus", "italianseasoning",
+    "lentils", "lunchveg", "milk", "oats", "oil", "onionpowder", "paprika",
+    "pasta", "peanut", "quinoa", "redpepper", "rice", "salmon", "salt",
+    "sauces", "shrimp", "snackeggs", "snackmilk", "snackyogurt", "spices",
+    "sweetpotato", "tofu", "tomatoes", "tuna", "turkey", "vinegar", "walnuts",
+    "whey", "wraps", "yogurt",
+}
+
+
+class TestCatalog(unittest.TestCase):
+    def test_ids_match_the_app(self):
+        self.assertEqual(VALID_IDS, APP_CATALOG_IDS)
+
+    def test_ids_unique(self):
+        self.assertEqual(len(ITEMS), len(VALID_IDS))
+
+    def test_twins_point_at_real_items(self):
+        for item in ITEMS:
+            for twin in item.twins:
+                self.assertIn(twin, VALID_IDS)
+
+
+class TestMatcher(unittest.TestCase):
+    def test_matches_staples(self):
+        for text, want in [
+            ("93% Lean Ground Turkey", "turkey"),
+            ("Boneless Skinless Chicken Breast", "chicken"),
+            ("Natural Peanut Butter 36 oz", "peanut"),
+            ("Plain Greek Yogurt 40oz", "yogurt"),
+            ("Frozen Blueberries 4 lb", "blueberries"),
+            ("Extra Virgin Olive Oil", "oil"),
+            ("Brown Rice 2 lb", "rice"),
+            ("Old Fashioned Rolled Oats", "oats"),
+        ]:
+            self.assertEqual(match(text), want, text)
+
+    def test_rejects_lookalikes(self):
+        """A wrong match silently corrupts the user's budget, so these matter."""
+        for text in [
+            "Peanut Butter Cups", "Cinnamon Toast Crunch Cereal", "Rice Cakes",
+            "Almond Milk", "Yoplait Yogurt Bars", "Chicken Nuggets",
+            "Dog Food Chicken Recipe", "Fish Oil Softgels",
+            "Protein Bars Chocolate Peanut Butter", "Tomato Ketchup",
+        ]:
+            self.assertIsNone(match(text), text)
+
+    def test_disambiguates_compounds(self):
+        self.assertEqual(match("Chicken Broth 32 oz"), "broth")
+        self.assertEqual(match("Beef Bouillon Cubes"), "broth")
+        self.assertEqual(match("Sweet Potatoes 3 lb"), "sweetpotato")
+
+
+class TestOffers(unittest.TestCase):
+    def test_explicit_savings(self):
+        o = extract("turkey", "S", "93% lean ground turkey", "Save $2.00 Limit 4")
+        self.assertEqual(o.savings, 2.00)
+        self.assertEqual(o.limit, 4)
+
+    def test_per_pound_converts_to_package(self):
+        # chicken package is 4.5-6.5 lb, midpoint 5.5
+        o = extract("chicken", "S", "Chicken Breast", "$1.99/lb")
+        self.assertAlmostEqual(o.sale_price, round(1.99 * 5.5, 2))
+
+    def test_per_pound_can_be_skipped(self):
+        self.assertIsNone(
+            extract("chicken", "S", "Chicken Breast", "$1.99/lb", per_weight="skip"))
+
+    def test_multibuy_becomes_unit_price(self):
+        o = extract("tomatoes", "S", "Diced Tomatoes", "2 for $2.00")
+        self.assertEqual(o.sale_price, 1.00)
+
+    def test_coupon_shorthand_is_savings(self):
+        o = extract("eggs", "S", "Large Eggs", "$1/1 coupon")
+        self.assertEqual(o.savings, 1.00)
+
+    def test_absurd_discount_is_capped(self):
+        """A $50-off on a $4.39 item is a bulk offer, not a free package."""
+        o = extract("turkey", "S", "Ground Turkey", "Save $50.00")
+        self.assertLessEqual(o.savings, BY_ID["turkey"].price * 0.5)
+
+    def test_price_above_normal_is_not_a_deal(self):
+        self.assertIsNone(extract("tofu", "S", "Tofu", "$9.99"))
+
+    def test_limit_parsing(self):
+        self.assertEqual(parse_limit("Limit 4."), 4)
+        self.assertIsNone(parse_limit("no limit here"))
+
+    def test_dedupe_keeps_best(self):
+        kept = dedupe([
+            Offer("eggs", "S", "a", savings=1.0),
+            Offer("eggs", "S", "b", savings=2.5),
+        ])
+        self.assertEqual(len(kept), 1)
+        self.assertEqual(kept[0].savings, 2.5)
+
+    def test_twins_are_mirrored(self):
+        ids = {o.item_id for o in mirror_twins([Offer("eggs", "S", "x", savings=1.0)])}
+        self.assertEqual(ids, {"eggs", "snackeggs"})
+
+
+class TestXML(unittest.TestCase):
+    def test_matches_app_fixture_shape(self):
+        xml = render("ShopRite", [
+            Offer("turkey", "ShopRite", "93% lean ground turkey", savings=2.0, limit=4),
+            Offer("eggs", "ShopRite", "Large eggs 18ct", sale_price=2.49, limit=6),
+        ])
+        self.assertIn('<shopriteSales store="ShopRite"', xml)
+        self.assertIn('<offer itemId="turkey" savings="2.00" limit="4" '
+                      'note="93% lean ground turkey"/>', xml)
+        self.assertIn('<offer itemId="eggs" salePrice="2.49" limit="6" '
+                      'note="Large eggs 18ct"/>', xml)
+        self.assertEqual(validate(xml), [])
+
+    def test_note_is_stripped_of_parser_hostile_characters(self):
+        note = safe_note('Bread & "stuff" <b>25% off</b>')
+        for ch in '&"<>':
+            self.assertNotIn(ch, note)
+
+    def test_validate_flags_unknown_item(self):
+        xml = render("S", [Offer("nosuchitem", "S", "x", savings=1.0)])
+        self.assertTrue(any("not in app catalog" in p for p in validate(xml)))
+
+    def test_offer_without_price_is_dropped(self):
+        xml = render("S", [Offer("eggs", "S", "x")])
+        self.assertNotIn("<offer", xml)
+
+
+if __name__ == "__main__":
+    unittest.main(verbosity=2)
