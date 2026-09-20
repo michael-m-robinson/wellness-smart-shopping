@@ -294,10 +294,6 @@ targets, and the XML import. The app's own self-test still passes:
 
 Tests in `test_crawler.py` guard the removal, so the scraper cannot creep back.
 
-> **Only have the binary?** `tools/retire_app_buttons.py` relabels and neuters a
-> compiled bundle in place, for anyone without the source. Building from `app/`
-> is better in every way and is the supported path.
-
 ### Make it sound like you
 
 Every greeting and heading is data, not code. Copy the example and edit:
@@ -378,14 +374,21 @@ icon, backs up first, and re-signs so macOS still opens it. macOS only.
 cd app && ./make_dmg.sh        # -> app/dist/Wellness Smart Shopping.dmg
 ```
 
-Open the image, drag the app onto the Applications folder beside it, done. The
-app is **self-contained**: the control panel ships inside it, so there is no
-folder to keep next to it and nothing to install separately. Press **Scan with
-Claude…** and it starts its own panel. Your settings, scans and sales files live
-in `~/Library/Application Support/Wellness Smart Shopping/`, never inside the
-app, which is read-only and signed.
+Double-click the image and the familiar window opens: the app on one side, the
+Applications folder on the other. Drag it across and you are done.
 
-To uninstall: drag the app to the Trash and delete that folder.
+**Everything it needs is already inside it.** The control panel, the crawler,
+the themes and the browser script all ship in the app's Resources, so there is
+no folder to keep beside it, nothing to `pip install`, and no second step. The
+binary links Apple's frameworks and nothing else; the Python side is standard
+library only. The single outside requirement is `python3`, which macOS provides
+— on a Mac that has never installed the command line tools the app says exactly
+what to run.
+
+Your settings, scans and sales files live in
+`~/Library/Application Support/Wellness Smart Shopping/`, never inside the app,
+which is read-only and signed. To uninstall: drag the app to the Trash and
+delete that folder.
 
 **Or from a clone**, if you want the crawler and the panel on the command line:
 

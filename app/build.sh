@@ -30,6 +30,10 @@ cp Info.plist "$OUT/Contents/Info.plist"
                         "$OUT/Contents/Info.plist" >/dev/null 2>&1 || \
 /usr/libexec/PlistBuddy -c "Set :CFBundleDisplayName $APP_NAME" \
                         "$OUT/Contents/Info.plist" >/dev/null
+# Regenerate the icon from the artwork so the two cannot drift apart.
+if [ -f art/icon-source.png ]; then
+  python3 ../tools/make_icon.py art/icon-source.png Resources/AppIcon.icns >/dev/null 2>&1 || true
+fi
 cp Resources/AppIcon.icns "$OUT/Contents/Resources/" 2>/dev/null || true
 
 # The closing picture: prefer a theme chosen in the control panel.

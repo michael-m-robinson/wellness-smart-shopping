@@ -23,3 +23,6 @@ requirements/detected.txt
 
 # Disk image output
 app/dist/
+
+# Generated icon intermediates
+app/art/icon-tile.png

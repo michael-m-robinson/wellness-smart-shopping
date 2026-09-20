@@ -233,55 +233,6 @@ class TestScanDirections(unittest.TestCase):
             self.assertIn(needle, html_out)
 
 
-class TestRetireAppButtons(unittest.TestCase):
-    """The binary patch is only safe while every replacement fits the original
-    byte-for-byte -- Swift keeps the literal's length as a code immediate."""
-
-    def test_replacements_never_exceed_the_original(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        for original, replacement in r.RETIREMENTS:
-            self.assertLessEqual(len(replacement), len(original),
-                                 msg=replacement[:40])
-
-    def test_padding_restores_the_exact_length(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        for original, replacement in r.RETIREMENTS:
-            padded = replacement + b" " * (len(original) - len(replacement))
-            self.assertEqual(len(padded), len(original))
-
-    def test_neutering_covers_every_scrape_target(self):
-        """Relabelling alone left the coupon engine fetching store pages."""
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        self.assertTrue(r.SCRAPE_URLS)
-        for url in r.SCRAPE_URLS:
-            self.assertLessEqual(len(r.BLANK), len(url), url)
-            self.assertTrue(url.startswith(b"http"), url)
-
-    def test_scraper_text_replacements_fit(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        for original, replacement in r.SCRAPER_TEXT:
-            self.assertLessEqual(len(replacement), len(original), replacement)
-
-    def test_neutering_can_be_opted_out_of(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        sample = b"x" * 400 + b"https://www.bjs.com/deals" + b"y" * 400
-        with_neuter = dict(r.build_rules(sample, neuter=True))
-        without = dict(r.build_rules(sample, neuter=False))
-        self.assertIn(b"https://www.bjs.com/deals", with_neuter)
-        self.assertNotIn(b"https://www.bjs.com/deals", without)
-
-    def test_replacements_point_at_the_control_panel(self):
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "tools"))
-        import retire_app_buttons as r
-        joined = b" ".join(rep for _, rep in r.RETIREMENTS).lower()
-        self.assertIn(b"control panel", joined)
-
-
 class TestNoNetworkAccess(unittest.TestCase):
     """Deals come only from a browser scan. Nothing here may fetch a store."""
 
@@ -884,6 +835,31 @@ class TestBundledLayout(unittest.TestCase):
             dmg = fh.read()
         self.assertIn("ln -s /Applications", dmg)
         self.assertIn("hdiutil create", dmg)
+
+    def test_dmg_window_is_arranged_not_left_to_finder(self):
+        """The point of the image is the window that opens: two big icons and
+        an arrow, not a default list view."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "app", "make_dmg.sh"), encoding="utf-8") as fh:
+            dmg = fh.read()
+        for setting in ("set icon size of opts", "background picture of opts",
+                        "set position of item", "icon view",
+                        "UDRW", "UDZO", ".VolumeIcon.icns"):
+            self.assertIn(setting, dmg, setting)
+
+    def test_icon_is_built_from_the_artwork(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        self.assertTrue(os.path.isfile(os.path.join(root, "app", "art", "icon-source.png")))
+        with open(os.path.join(root, "app", "build.sh"), encoding="utf-8") as fh:
+            self.assertIn("make_icon.py", fh.read())
+
+    def test_app_carries_everything_it_needs(self):
+        """No folder beside it, nothing to install separately."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "app", "build.sh"), encoding="utf-8") as fh:
+            build = fh.read()
+        for shipped in ("panel.py", "crawl.py", "dealcrawler", "themes", "browser"):
+            self.assertIn(shipped, build, shipped)
 
 
 if __name__ == "__main__":

@@ -1,0 +1,510 @@
+<title>Wellness Shopper Runsheet</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:wght@500;600&display=swap">
+<style>
+  :root {
+    --ground: #faf8f3;
+    --surface: #ffffff;
+    --raise: #f2efe7;
+    --ink: #1b1f1a;
+    --muted: #6a7064;
+    --line: #e2ded2;
+    --accent: #2f6b45;
+    --accent-soft: #e3efe6;
+    --warn: #8a5a12;
+    --warn-soft: #f8efdc;
+    --done: #2f7a45;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --ground: #14170f;
+      --surface: #1c1f19;
+      --raise: #242820;
+      --ink: #e9ece5;
+      --muted: #9aa292;
+      --line: #2f342a;
+      --accent: #78b78c;
+      --accent-soft: #1f2a22;
+      --warn: #d7a765;
+      --warn-soft: #2a2417;
+      --done: #7cc08e;
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground: #14170f;
+    --surface: #1c1f19;
+    --raise: #242820;
+    --ink: #e9ece5;
+    --muted: #9aa292;
+    --line: #2f342a;
+    --accent: #78b78c;
+    --accent-soft: #1f2a22;
+    --warn: #d7a765;
+    --warn-soft: #2a2417;
+    --done: #7cc08e;
+  }
+
+  * { box-sizing: border-box; }
+  .print-only { display: none; }
+  body {
+    background: var(--ground);
+    color: var(--ink);
+    font-family: "IBM Plex Sans", system-ui, -apple-system, sans-serif;
+    font-size: 15px;
+    line-height: 1.55;
+    margin: 0;
+  }
+  .wrap { max-width: 860px; margin: 0 auto; padding-inline: 20px; padding-block: 0 72px; }
+
+  /* ---------- masthead ---------- */
+  header { padding-block: 44px 28px; }
+  .eyebrow {
+    font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 11px; letter-spacing: .14em; text-transform: uppercase;
+    color: var(--accent); margin: 0 0 10px;
+  }
+  h1 {
+    font-family: "IBM Plex Serif", Georgia, serif;
+    font-weight: 600; font-size: clamp(1.9rem, 5vw, 2.6rem);
+    line-height: 1.1; margin: 0 0 12px; text-wrap: balance;
+  }
+  .lede { color: var(--muted); max-width: 62ch; margin: 0; font-size: 1.02rem; }
+
+  /* ---------- progress ---------- */
+  .progress {
+    position: sticky; top: env(safe-area-inset-top, 0px); z-index: 10;
+    background: var(--ground); border-bottom: 1px solid var(--line);
+    padding-block: 12px; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 14px; flex-wrap: wrap;
+  }
+  .meter { flex: 1 1 200px; height: 6px; background: var(--raise); border-radius: 99px; overflow: hidden; min-width: 140px; }
+  .meter i { display: block; height: 100%; width: 0; background: var(--accent); transition: width .25s ease; }
+  .tally {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 13px;
+    font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap;
+  }
+  .tally b { color: var(--ink); font-weight: 500; }
+  button.reset {
+    font: inherit; font-size: 13px; color: var(--muted); background: none;
+    border: 1px solid var(--line); border-radius: 7px; padding: 5px 12px; cursor: pointer;
+  }
+  button.reset:hover { color: var(--ink); border-color: var(--accent); }
+
+  /* ---------- sections ---------- */
+  section { margin-top: 38px; }
+  .shead { display: flex; align-items: baseline; gap: 12px; margin-bottom: 4px; }
+  .num {
+    font-family: "IBM Plex Mono", ui-monospace, monospace; font-size: 12px;
+    color: var(--accent); font-variant-numeric: tabular-nums;
+    padding-top: 4px;
+  }
+  h2 {
+    font-family: "IBM Plex Serif", Georgia, serif; font-weight: 600;
+    font-size: 1.28rem; margin: 0; text-wrap: balance;
+  }
+  .snote { color: var(--muted); font-size: .93rem; margin: 2px 0 14px 34px; max-width: 62ch; }
+
+  /* ---------- checks ---------- */
+  ol.checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 1px; }
+  li.check {
+    background: var(--surface); border: 1px solid var(--line);
+    display: grid; grid-template-columns: auto 1fr; gap: 0 13px;
+    padding: 13px 15px; align-items: start;
+  }
+  li.check + li.check { border-top: 0; }
+  li.check:first-child { border-radius: 10px 10px 0 0; }
+  li.check:last-child { border-radius: 0 0 10px 10px; }
+  li.check:only-child { border-radius: 10px; }
+  li.check.on { background: var(--accent-soft); border-color: var(--accent-soft); }
+  li.check.on + li.check { border-top: 0; }
+
+  input[type=checkbox] {
+    appearance: none; width: 19px; height: 19px; margin: 2px 0 0;
+    border: 1.5px solid var(--muted); border-radius: 5px; cursor: pointer;
+    background: var(--surface); display: grid; place-content: center; flex: none;
+  }
+  input[type=checkbox]:checked { background: var(--done); border-color: var(--done); }
+  input[type=checkbox]:checked::after {
+    content: ""; width: 5px; height: 9px; margin-top: -2px;
+    border: solid #fff; border-width: 0 2px 2px 0; transform: rotate(45deg);
+  }
+  input[type=checkbox]:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+
+  .do { font-weight: 500; }
+  li.check.on .do { text-decoration: line-through; text-decoration-color: color-mix(in srgb, var(--muted) 60%, transparent); }
+  .expect { color: var(--muted); font-size: .92rem; margin-top: 3px; }
+  .expect b { color: var(--ink); font-weight: 500; }
+
+  code, .cmd {
+    font-family: "IBM Plex Mono", ui-monospace, SFMono-Regular, monospace;
+    font-size: .855em;
+  }
+  code { background: var(--raise); padding: 1.5px 5px; border-radius: 4px; word-break: break-word; }
+  .cmd {
+    display: block; background: var(--raise); border-radius: 7px;
+    padding: 9px 12px; margin-top: 8px; font-size: 12.5px;
+    overflow-x: auto; white-space: pre; color: var(--ink);
+  }
+  li.check.on .cmd, li.check.on code { background: color-mix(in srgb, var(--surface) 55%, transparent); }
+
+  .pill {
+    display: inline-block; font-family: "IBM Plex Mono", ui-monospace, monospace;
+    font-size: 10px; letter-spacing: .07em; text-transform: uppercase;
+    padding: 2px 7px; border-radius: 99px; margin-left: 8px; vertical-align: 1px;
+    background: var(--warn-soft); color: var(--warn); font-weight: 500;
+  }
+  .pill.opt { background: var(--raise); color: var(--muted); }
+
+  .callout {
+    background: var(--warn-soft); border-left: 3px solid var(--warn);
+    padding: 13px 16px; border-radius: 0 9px 9px 0; margin: 16px 0 0;
+    font-size: .93rem; color: var(--ink);
+  }
+  .callout b { font-weight: 600; }
+
+  footer {
+    margin-top: 52px; padding-top: 22px; border-top: 1px solid var(--line);
+    color: var(--muted); font-size: .88rem;
+  }
+  footer p { margin: 0 0 6px; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; }
+  }
+  @media (max-width: 520px) {
+    .snote { margin-left: 0; }
+    li.check { padding: 12px; }
+  }
+
+  /* ---------- on paper ---------- */
+  @media print {
+    /* Force the light palette: a dark screen theme wastes ink and reads badly. */
+    :root, :root[data-theme="dark"] {
+      --ground: #ffffff; --surface: #ffffff; --raise: #f2efe7;
+      --ink: #14170f; --muted: #55594f; --line: #c9c5b8;
+      --accent: #275a3a; --accent-soft: #ffffff;
+      --warn: #6f470e; --warn-soft: #f8efdc; --done: #275a3a;
+    }
+    @page { margin: 14mm 13mm; }
+    body { font-size: 10.5pt; }
+    .wrap { max-width: none; padding-inline: 0; padding-block: 0; }
+    header { padding-block: 0 16px; }
+    h1 { font-size: 21pt; }
+    .lede { font-size: 10.5pt; }
+
+    /* Screen-only furniture. */
+    .progress, button.reset, .screen-only { display: none !important; }
+    .print-only { display: inline; }
+
+    /* Keep a check and its command together, and sections off page edges. */
+    section { margin-top: 20px; break-inside: auto; }
+    .shead, .snote { break-after: avoid; }
+    li.check { break-inside: avoid; padding: 8px 10px; }
+    li.check.on { background: #ffffff; }
+    li.check.on .do { text-decoration: none; }
+    .callout, footer { break-inside: avoid; }
+
+    /* Empty squares to tick by hand; a printed tick cannot be undone. */
+    input[type=checkbox] {
+      width: 13px; height: 13px; border: 1pt solid #55594f;
+      background: #fff !important; border-radius: 2px; print-color-adjust: exact;
+    }
+    input[type=checkbox]:checked { background: #fff !important; border-color: #55594f; }
+    input[type=checkbox]:checked::after { border-color: #14170f; }
+
+    .cmd { background: #f2efe7; print-color-adjust: exact; white-space: pre-wrap; font-size: 8.5pt; }
+    code { background: #f2efe7; print-color-adjust: exact; }
+    .pill { border: 0.5pt solid currentColor; print-color-adjust: exact; }
+    .callout { print-color-adjust: exact; }
+    a { color: inherit; text-decoration: none; }
+  }
+</style>
+
+<div class="wrap">
+
+<header>
+  <p class="eyebrow">Acceptance run &middot; v1.1.0</p>
+  <h1>Wellness Smart Shopping runsheet</h1>
+  <p class="lede">Work top to bottom with the app closed to start. Each row says what to do and
+  what you should see &mdash; if the two disagree, that's the bug.
+  <span class="screen-only">Ticks are saved in this browser.</span>
+  <span class="print-only">Tick the boxes as you go; note the row number for anything that fails.</span></p>
+</header>
+
+<div class="progress">
+  <div class="meter"><i id="bar"></i></div>
+  <span class="tally"><b id="done">0</b> / <span id="total">0</span> checked</span>
+  <button class="reset" id="reset" type="button">Clear ticks</button>
+</div>
+
+<section>
+  <div class="shead"><span class="num">01</span><h2>Install from the disk image</h2></div>
+  <p class="snote">The app is self-contained. Nothing needs to sit beside it.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c1"><div>
+      <div class="do">Build the image, then open it</div>
+      <div class="expect">Expect a window with the app, an <b>Applications</b> shortcut and a Read Me.</div>
+      <code class="cmd">cd app &amp;&amp; ./make_dmg.sh
+open "dist/Wellness Smart Shopping.dmg"</code></div></li>
+    <li class="check"><input type="checkbox" id="c2"><div>
+      <div class="do">Drag the app onto the Applications shortcut</div>
+      <div class="expect">Copies in a second or two. Then eject the image.</div></div></li>
+    <li class="check"><input type="checkbox" id="c3"><div>
+      <div class="do">Open it from Applications (or Launchpad)</div>
+      <div class="expect">Launches with no Gatekeeper warning &mdash; it is ad-hoc signed.</div></div></li>
+    <li class="check"><input type="checkbox" id="c4"><div>
+      <div class="do">Check Launchpad shows exactly one</div>
+      <div class="expect">One <b>Wellness Smart Shopping</b>. Two means a stale copy survived.</div></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">02</span><h2>Your daily targets</h2></div>
+  <p class="snote">First run asks for the few details that size the shopping list to you.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c5"><div>
+      <div class="do">Press <b>Scan with Claude&hellip;</b>, then <b>Start Control Panel</b></div>
+      <div class="expect">Progress ticks, then the panel opens in your browser.</div></div></li>
+    <li class="check"><input type="checkbox" id="c6"><div>
+      <div class="do">The targets form opens by itself</div>
+      <div class="expect">Only on a first run, when no profile is saved yet.</div></div></li>
+    <li class="check"><input type="checkbox" id="c7"><div>
+      <div class="do">Enter height, weight, age, sex and activity</div>
+      <div class="expect">The target updates <b>as you type</b>, no Save needed.</div></div></li>
+    <li class="check"><input type="checkbox" id="c8"><div>
+      <div class="do">Switch activity from Sedentary to Very active</div>
+      <div class="expect">Calories <b>and protein</b> both rise &mdash; training raises protein need, not just energy.</div></div></li>
+    <li class="check"><input type="checkbox" id="c9"><div>
+      <div class="do">Switch goal between Maintenance, Cutting and Build Muscle</div>
+      <div class="expect">Cutting lands below maintenance, Build Muscle above.</div></div></li>
+    <li class="check"><input type="checkbox" id="c10"><div>
+      <div class="do">Clear the age field</div>
+      <div class="expect">Falls back to a size-only estimate and says so, rather than breaking.</div></div></li>
+    <li class="check"><input type="checkbox" id="c11"><div>
+      <div class="do">Press <b>Save targets</b>, then reload the page</div>
+      <div class="expect">The card keeps your numbers; the form no longer opens on its own.</div></div></li>
+    <li class="check"><input type="checkbox" id="c12"><div>
+      <div class="do">Press <b>Edit</b> on the targets card</div>
+      <div class="expect">Reopens with your saved values in the fields.</div></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">03</span><h2>Make it yours</h2></div>
+  <p class="snote">Every greeting, heading and image is data, not code.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c13"><div>
+      <div class="do">The extension notice appears near the top</div>
+      <div class="expect">With <b>Get the extension</b> and <b>I already have it</b>.</div></div></li>
+    <li class="check"><input type="checkbox" id="c14"><div>
+      <div class="do">Press <b>I already have it</b>, then reload</div>
+      <div class="expect">Gone for good. It cannot truly detect the extension, so it asks rather than guesses.</div></div></li>
+    <li class="check"><input type="checkbox" id="c15"><div>
+      <div class="do">Pick a different look</div>
+      <div class="expect">Banner changes at once. 26 to choose from: six drawn, twenty photographs.</div></div></li>
+    <li class="check"><input type="checkbox" id="c16"><div>
+      <div class="do">Drop your own image into the themes folder, reload</div>
+      <div class="expect">Appears in the picker alongside the rest.</div>
+      <code class="cmd">open ~/Library/Application\ Support/Wellness\ Smart\ Shopping/themes</code></div></li>
+    <li class="check"><input type="checkbox" id="c17"><div>
+      <div class="do">Change the app name, greeting, tagline and deals heading</div>
+      <div class="expect">Header updates live as you type.</div></div></li>
+    <li class="check"><input type="checkbox" id="c18"><div>
+      <div class="do">Pick a shopping list message, or write your own</div>
+      <div class="expect">The line above the deals changes to match.</div></div></li>
+    <li class="check"><input type="checkbox" id="c19"><div>
+      <div class="do">Press <b>Save</b>, then reload</div>
+      <div class="expect">All of it persists.</div></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">04</span><h2>Scan with Claude</h2><span class="pill">needs the extension</span></div>
+  <p class="snote">The heart of it: Claude reads deals off a store page you are signed in to.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c20"><div>
+      <div class="do">Press <b>Scan with Claude</b> in the panel</div>
+      <div class="expect">A store picker, each store marked scanned or not scanned yet.</div></div></li>
+    <li class="check"><input type="checkbox" id="c21"><div>
+      <div class="do">Pick ShopRite</div>
+      <div class="expect">Links to its coupon list <b>and</b> weekly ad &mdash; labelled differently, not twice the same.</div></div></li>
+    <li class="check"><input type="checkbox" id="c22"><div>
+      <div class="do">Press <b>Copy</b> on the instruction</div>
+      <div class="expect">Button confirms. The path in it is where your scan must be saved.</div></div></li>
+    <li class="check"><input type="checkbox" id="c23"><div>
+      <div class="do">Open the store, sign in, and give Claude that instruction</div>
+      <div class="expect">Claude scrolls the whole list and saves one offer per line.</div></div></li>
+    <li class="check"><input type="checkbox" id="c24"><div>
+      <div class="do">Leave the panel waiting</div>
+      <div class="expect">It notices within a few seconds &mdash; no button to press.</div></div></li>
+    <li class="check"><input type="checkbox" id="c25"><div>
+      <div class="do">Read the result</div>
+      <div class="expect"><b>&ldquo;N deals found. Import it now?&rdquo;</b> If nothing matched your staples it says so plainly instead of writing an empty file.</div></div></li>
+    <li class="check"><input type="checkbox" id="c26"><div>
+      <div class="do">Press <b>Not now</b></div>
+      <div class="expect">Tells you exactly where the file is waiting. Declining loses nothing.</div></div></li>
+    <li class="check"><input type="checkbox" id="c27"><div>
+      <div class="do">Scan again and press <b>Import deals now</b></div>
+      <div class="expect">Opens the app, reveals the file in Finder, path on your clipboard.</div></div></li>
+    <li class="check"><input type="checkbox" id="c28"><div>
+      <div class="do">Try it without a scan &mdash; try the sample instead</div>
+      <div class="expect">Ten matches, including a per-pound price converted to a per-package one.</div>
+      <code class="cmd">python3 crawl.py --harvest shoprite=examples/sample-scan.txt --report</code></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">05</span><h2>The deals are sound</h2></div>
+  <p class="snote">A wrong match quietly corrupts your budget, so these are worth checking.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c29"><div>
+      <div class="do">Look at the reported basis for each deal</div>
+      <div class="expect">Per-pound converted to per-package, &ldquo;2 for $5&rdquo; to a unit price, limits carried through.</div></div></li>
+    <li class="check"><input type="checkbox" id="c30"><div>
+      <div class="do">Check what was <em>not</em> matched</div>
+      <div class="expect">Junk is rejected: &ldquo;Peanut Butter Cups&rdquo; and &ldquo;Cinnamon Toast Crunch&rdquo; are not peanut butter and cinnamon.</div></div></li>
+    <li class="check"><input type="checkbox" id="c31"><div>
+      <div class="do">Validate the XML against the catalog</div>
+      <div class="expect">Prints <code>clean</code>. Unknown item IDs are silently dropped by the app, so this matters.</div>
+      <code class="cmd">python3 -c "import sys;sys.path.insert(0,'.');\
+from dealcrawler.xmlout import validate;\
+print(validate(open('out/shoprite-sales-2026-09-20.xml').read()) or 'clean')"</code></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">06</span><h2>The desktop app</h2></div>
+  <p class="snote">Planning and PDFs live here; scanning lives in the panel.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c32"><div>
+      <div class="do">Read the button on the main window</div>
+      <div class="expect">It says <b>Scan with Claude&hellip;</b> &mdash; never &ldquo;Coupons (1)&hellip;&rdquo;. The old coupon finder is deleted, not hidden.</div></div></li>
+    <li class="check"><input type="checkbox" id="c33"><div>
+      <div class="do">Open its panel</div>
+      <div class="expect">Four controls and no list of entry boxes: Start Control Panel, Import Sales XML, Clear, Close.</div></div></li>
+    <li class="check"><input type="checkbox" id="c34"><div>
+      <div class="do">Choose <b>Import Sales XML&hellip;</b> and pick your file</div>
+      <div class="expect">Offers the deals for confirmation, then applies them.</div></div></li>
+    <li class="check"><input type="checkbox" id="c35"><div>
+      <div class="do">Close the panel, reopen it</div>
+      <div class="expect">Your imported deals survive. Closing must never wipe them.</div></div></li>
+    <li class="check"><input type="checkbox" id="c36"><div>
+      <div class="do">Click into the browser while the panel is open</div>
+      <div class="expect">The window <b>stays put</b>; it does not vanish when the app loses focus.</div></div></li>
+    <li class="check"><input type="checkbox" id="c37"><div>
+      <div class="do">Create the PDFs</div>
+      <div class="expect">Shopping list, recipes and daily meals, priced around your imported deals.</div></div></li>
+    <li class="check"><input type="checkbox" id="c38"><div>
+      <div class="do">Quit the app</div>
+      <div class="expect">The control panel stops with it &mdash; the app started it, so the app stops it.</div>
+      <code class="cmd">pgrep -fl panel.py   # expect nothing</code></div></li>
+    <li class="check"><input type="checkbox" id="c39"><div>
+      <div class="do">Run its own self-test</div>
+      <div class="expect">Ends <code>SELF_TEST_OK</code>, including <code>XML_IMPORT_OK</code>.</div>
+      <code class="cmd">"/Applications/Wellness Smart Shopping.app/Contents/MacOS/SmartShoppingList" \
+  --self-test /tmp/a.pdf /tmp/b.pdf /tmp/c.pdf</code></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">07</span><h2>Where your files live</h2></div>
+  <p class="snote">An installed app is read-only and signed, so nothing may be written inside it.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c40"><div>
+      <div class="do">Look in Application Support</div>
+      <div class="expect"><code>config.json</code>, <code>branding.json</code>, <code>profile.json</code>, <code>harvest/</code>, <code>out/</code>, <code>themes/</code>.</div>
+      <code class="cmd">open ~/Library/Application\ Support/Wellness\ Smart\ Shopping</code></div></li>
+    <li class="check"><input type="checkbox" id="c41"><div>
+      <div class="do">Confirm nothing was written inside the app</div>
+      <div class="expect">No output. A write in there would break the signature.</div>
+      <code class="cmd">find "/Applications/Wellness Smart Shopping.app" \
+  -name "*.pyc" -o -name "config.json" -o -name "__pycache__"</code></div></li>
+    <li class="check"><input type="checkbox" id="c42"><div>
+      <div class="do">Re-verify the signature after a full session</div>
+      <div class="expect">Silence means valid.</div>
+      <code class="cmd">codesign --verify --deep --strict "/Applications/Wellness Smart Shopping.app"</code></div></li>
+    <li class="check"><input type="checkbox" id="c43"><div>
+      <div class="do">Confirm it never phones home</div>
+      <div class="expect">Passes. The crawler makes <b>no network requests at all</b>; deals come only from a scan you ran.</div>
+      <code class="cmd">python3 test_crawler.py 2>&amp;1 | tail -3   # 116 tests</code></div></li>
+  </ol>
+</section>
+
+<section>
+  <div class="shead"><span class="num">08</span><h2>Off again, cleanly</h2><span class="pill opt">do last</span></div>
+  <p class="snote">Anything you give away should come off without leaving a mess.</p>
+  <ol class="checks">
+    <li class="check"><input type="checkbox" id="c44"><div>
+      <div class="do">Check first, change nothing</div>
+      <div class="expect">Reports every copy it can find and creates <b>nothing</b>.</div>
+      <code class="cmd">python3 installer.py --check</code></div></li>
+    <li class="check"><input type="checkbox" id="c45"><div>
+      <div class="do">Uninstall</div>
+      <div class="expect">App, preferences, caches, WebKit and HTTPStorages all go. Your shopping data is asked about separately.</div>
+      <code class="cmd">python3 installer.py --uninstall</code></div></li>
+    <li class="check"><input type="checkbox" id="c46"><div>
+      <div class="do">Check Launchpad and Spotlight</div>
+      <div class="expect">No ghost entry &mdash; removals deregister from LaunchServices, not just delete files.</div></div></li>
+  </ol>
+
+  <div class="callout">
+    <b>If a check fails,</b> note the row number and what you saw instead. The gap between
+    &ldquo;what to do&rdquo; and &ldquo;what you should see&rdquo; is usually enough to find it.
+  </div>
+</section>
+
+<footer>
+  <p>Wellness Smart Shopping &middot; free and open source, MIT.</p>
+  <p>Scanning needs Google Chrome or another Chromium browser, the Claude for Chrome
+     extension and a Claude subscription. Everything else works without them.</p>
+</footer>
+
+</div>
+
+<script>
+  (function () {
+    var boxes = Array.prototype.slice.call(document.querySelectorAll('input[type=checkbox]'));
+    var bar = document.getElementById('bar');
+    var doneEl = document.getElementById('done');
+    var KEY = 'wss.runsheet.v1';
+
+    document.getElementById('total').textContent = boxes.length;
+
+    function read() {
+      try { return JSON.parse(localStorage.getItem(KEY) || '{}'); }
+      catch (e) { return {}; }
+    }
+    function write(state) {
+      try { localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) {}
+    }
+
+    function paint() {
+      var n = 0;
+      boxes.forEach(function (box) {
+        var row = box.closest('.check');
+        if (box.checked) { n++; row.classList.add('on'); }
+        else { row.classList.remove('on'); }
+      });
+      doneEl.textContent = n;
+      bar.style.width = boxes.length ? (n / boxes.length * 100) + '%' : '0';
+    }
+
+    var saved = read();
+    boxes.forEach(function (box) {
+      if (saved[box.id]) box.checked = true;
+      box.addEventListener('change', function () {
+        var state = read();
+        if (box.checked) state[box.id] = 1; else delete state[box.id];
+        write(state);
+        paint();
+      });
+    });
+
+    document.getElementById('reset').addEventListener('click', function () {
+      boxes.forEach(function (box) { box.checked = false; });
+      write({});
+      paint();
+    });
+
+    paint();
+  })();
+</script>

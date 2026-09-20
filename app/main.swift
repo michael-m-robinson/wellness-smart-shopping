@@ -2304,7 +2304,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         do {
             try process.run()
         } catch {
-            setControlPanelBusy(false, "Could not start it: \(error.localizedDescription). Is python3 installed?")
+            // The only thing this app needs that it does not carry itself.
+            // macOS ships python3, but a machine that has never installed the
+            // command line tools has only a stub.
+            setControlPanelBusy(false, "Could not start the control panel. macOS needs its command line tools for this - open Terminal and run:  xcode-select --install")
             return
         }
         controlPanelProcess = process
