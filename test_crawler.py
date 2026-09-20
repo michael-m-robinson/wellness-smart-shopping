@@ -847,6 +847,21 @@ class TestBundledLayout(unittest.TestCase):
                         "UDRW", "UDZO", ".VolumeIcon.icns"):
             self.assertIn(setting, dmg, setting)
 
+    def test_volume_icon_sets_creator_before_flag(self):
+        """Order matters: the flag alone fails with -61."""
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "app", "make_dmg.sh"), encoding="utf-8") as fh:
+            dmg = fh.read()
+        creator = dmg.index("SetFile -c icnC")
+        flag = dmg.index('SetFile -a C "$MOUNTED"')
+        self.assertLess(creator, flag)
+
+    def test_window_arrow_uses_the_supplied_artwork(self):
+        root = os.path.dirname(os.path.abspath(__file__))
+        self.assertTrue(os.path.isfile(os.path.join(root, "app", "art", "arrow-source.png")))
+        with open(os.path.join(root, "app", "make_dmg.sh"), encoding="utf-8") as fh:
+            self.assertIn("--arrow", fh.read())
+
     def test_icon_is_built_from_the_artwork(self):
         root = os.path.dirname(os.path.abspath(__file__))
         self.assertTrue(os.path.isfile(os.path.join(root, "app", "art", "icon-source.png")))

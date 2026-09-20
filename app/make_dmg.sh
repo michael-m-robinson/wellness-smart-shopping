@@ -42,7 +42,8 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 mkdir -p "$STAGE/.background"
-python3 ../tools/make_dmg_art.py "$STAGE/.background/background.png" >/dev/null
+python3 ../tools/make_dmg_art.py "$STAGE/.background/background.png" \
+    --arrow art/arrow-source.png >/dev/null
 cp Resources/AppIcon.icns "$STAGE/.VolumeIcon.icns"
 
 # --- a writable image we can arrange ----------------------------------------
@@ -83,8 +84,11 @@ then
 fi
 
 # The volume icon only takes effect once the file is flagged as one.
+# Two steps, and the order matters: the icon file needs its creator code before
+# the volume will accept the custom-icon flag. Flag alone fails with -61.
 if command -v SetFile >/dev/null 2>&1; then
-  SetFile -a C "$MOUNTED" 2>/dev/null || echo "  (volume icon needs SetFile; skipped)"
+  SetFile -c icnC "$MOUNTED/.VolumeIcon.icns" 2>/dev/null || true
+  SetFile -a C "$MOUNTED" 2>/dev/null || echo "  (could not set the volume icon)"
 fi
 
 sync

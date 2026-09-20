@@ -8,13 +8,18 @@ to where it is dropped, and the one instruction. Standard library only.
 """
 
 import argparse
-import math
 import os
 import struct
 import sys
 import zlib
 
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from make_icon import content_bounds, crop, read_png  # noqa: E402
+
 WIDTH, HEIGHT = 700, 460
+# The gap between the two icons, in the window's own coordinates.
+ARROW_CENTRE = (349, 196)
+ARROW_WIDTH = 168
 # Sampled from the icon: green on the left, blue on the right.
 GREEN = (0x3F, 0xB9, 0x8B)
 BLUE = (0x2E, 0x96, 0xD8)
@@ -39,6 +44,41 @@ def write_png(path, pixels, width=WIDTH, height=HEIGHT):
                  + chunk(b"IEND", b""))
 
 
+def box_scale(rows, target_width):
+    """Area-average down to a target width, keeping the aspect ratio.
+
+    The artwork is several times larger than it will be shown, so averaging
+    each destination pixel over the source block it covers keeps the edges
+    clean where nearest-neighbour would break them up.
+    """
+    height, width = len(rows), len(rows[0])
+    scale = target_width / float(width)
+    target_height = max(1, int(round(height * scale)))
+    out = []
+    for ty in range(target_height):
+        y0 = int(ty * height / target_height)
+        y1 = max(y0 + 1, int((ty + 1) * height / target_height))
+        line = []
+        for tx in range(target_width):
+            x0 = int(tx * width / target_width)
+            x1 = max(x0 + 1, int((tx + 1) * width / target_width))
+            r = g = b = a = n = 0
+            for sy in range(y0, y1):
+                row = rows[sy]
+                for sx in range(x0, x1):
+                    pr, pg, pb, pa = row[sx]
+                    # Weight colour by alpha so transparent pixels do not
+                    # wash the edges toward black.
+                    r += pr * pa; g += pg * pa; b += pb * pa
+                    a += pa; n += 1
+            if a:
+                line.append((r // a, g // a, b // a, a // n))
+            else:
+                line.append((0, 0, 0, 0))
+        out.append(line)
+    return out
+
+
 def blend(base, colour, alpha):
     return tuple(int(round(b + (c - b) * alpha)) for b, c in zip(base, colour))
 
@@ -47,6 +87,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("out")
+    ap.add_argument("--arrow", help="artwork to place between the two icons")
     args = ap.parse_args(argv)
 
     px = []
@@ -63,20 +104,15 @@ def main(argv=None):
             i = y * WIDTH + x
             px[i] = list(blend(px[i], colour, min(1.0, alpha)))
 
-    # A hairline arrow between the two icons, sitting under their labels.
-    ink = (0x4A, 0x6E, 0x72)
-    y_mid, x_from, x_to = 214, 300, 404
-    for x in range(x_from, x_to + 1):
-        # Fade in and out so it reads as a hint, not a rule.
-        edge = min(x - x_from, x_to - x) / 26.0
-        a = 0.34 * min(1.0, edge)
-        put(x, y_mid, ink, a)
-        put(x, y_mid + 1, ink, a * 0.5)
-    for i in range(13):
-        a = 0.34 * (1 - i / 16.0)
-        for d in (-1, 1):
-            put(x_to - i, y_mid + d * i // 1, ink, a)
-            put(x_to - i, y_mid + d * i // 1 + 1, ink, a * 0.4)
+    if args.arrow and os.path.isfile(args.arrow):
+        tile = crop(*((read_png(args.arrow)[2],) + content_bounds(read_png(args.arrow)[2])))
+        scaled = box_scale(tile, ARROW_WIDTH)
+        oy = ARROW_CENTRE[1] - len(scaled) // 2
+        ox = ARROW_CENTRE[0] - len(scaled[0]) // 2
+        for y, row in enumerate(scaled):
+            for x, (r, g, b, a) in enumerate(row):
+                put(ox + x, oy + y, (r, g, b), a / 255.0)
+        print(f"  arrow {len(scaled[0])}x{len(scaled)} at {ARROW_CENTRE}")
 
     write_png(args.out, px)
     print(f"  wrote {args.out} ({WIDTH}x{HEIGHT})")
