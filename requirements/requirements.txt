@@ -1,0 +1,12 @@
+# Wellness Smart Shopping - Python requirements
+#
+# There are none. Deliberately.
+#
+# The crawler, the control panel and the installer use only the Python
+# standard library, so `pip install -r requirements.txt` is a no-op and this
+# file exists only so that running it succeeds rather than erroring.
+#
+# Nothing is downloaded at install time, nothing pins a version, and nothing
+# can break when an upstream package changes. What the project *does* need is
+# a handful of tools that come with macOS or with Chrome -- see README.md in
+# this folder, and run ../install.command to check and set them up.

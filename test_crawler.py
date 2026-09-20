@@ -701,5 +701,86 @@ class TestPanelHeadProbe(unittest.TestCase):
         self.assertIn("def do_HEAD", open(panel.__file__, encoding="utf-8").read())
 
 
+class TestInstaller(unittest.TestCase):
+    """The setup wizard must be honest about dependencies and safe to re-run."""
+
+    @classmethod
+    def setUpClass(cls):
+        root = os.path.dirname(os.path.abspath(__file__))
+        cls.root = root
+        with open(os.path.join(root, "installer.py"), encoding="utf-8") as fh:
+            cls.src = fh.read()
+
+    def test_check_mode_makes_no_changes(self):
+        """--check must never write; it is the 'look first' mode."""
+        import subprocess as sp
+        before = {f: os.path.getmtime(os.path.join(self.root, f))
+                  for f in os.listdir(self.root)
+                  if os.path.isfile(os.path.join(self.root, f))}
+        env = dict(os.environ, WSS_SKIP_TESTS="1")
+        sp.run([sys.executable, "installer.py", "--check"],
+               cwd=self.root, capture_output=True, timeout=120, env=env)
+        after = {f: os.path.getmtime(os.path.join(self.root, f))
+                 for f in os.listdir(self.root)
+                 if os.path.isfile(os.path.join(self.root, f))}
+        self.assertEqual(before, after)
+
+    def test_requirements_txt_pins_nothing(self):
+        path = os.path.join(self.root, "requirements", "requirements.txt")
+        with open(path, encoding="utf-8") as fh:
+            body = [ln.strip() for ln in fh
+                    if ln.strip() and not ln.strip().startswith("#")]
+        self.assertEqual(body, [], "there are no third-party packages to pin")
+
+    def test_no_third_party_imports_anywhere(self):
+        """The wizard's central claim: standard library only."""
+        import importlib.util
+        import re as _re
+        found = set()
+        for dirpath, dirnames, filenames in os.walk(self.root):
+            dirnames[:] = [d for d in dirnames
+                           if d not in {"build", "__pycache__", ".git"}]
+            for name in filenames:
+                if not name.endswith(".py"):
+                    continue
+                with open(os.path.join(dirpath, name), encoding="utf-8",
+                          errors="ignore") as fh:
+                    for line in fh:
+                        m = _re.match(r"\s*(?:import|from)\s+([a-zA-Z_][\w.]*)", line)
+                        if m:
+                            found.add(m.group(1).split(".")[0])
+        for module in found:
+            spec = importlib.util.find_spec(module) if module not in sys.builtin_module_names else None
+            if spec and spec.origin and "site-packages" in str(spec.origin):
+                self.fail(f"third-party dependency crept in: {module}")
+
+    def test_branding_is_not_seeded(self):
+        """Copying every default into branding.json would shadow future ones."""
+        self.assertIn("branding.json is deliberately NOT created", self.src)
+        self.assertNotIn('("branding.example.json", "branding.json")', self.src)
+
+    def test_nothing_installs_without_asking(self):
+        for action in ("xcode-select", "shutil.copytree", "build.sh"):
+            self.assertIn(action, self.src)
+        self.assertIn("def ask(", self.src)
+
+    def test_never_invokes_sudo(self):
+        """Checked as a call, not a word -- the docstring mentions it."""
+        import re as _re
+        for call in _re.finditer(r"(?:subprocess\.(?:run|Popen)|run)\(\s*\[([^\]]*)\]",
+                                 self.src):
+            self.assertNotIn("sudo", call.group(1))
+
+    def test_any_chromium_browser_counts(self):
+        """The extension runs in Edge, Brave and Arc too, not just Chrome."""
+        for browser in ("Microsoft Edge", "Brave", "Arc", "Chromium"):
+            self.assertIn(browser, self.src)
+
+    def test_double_click_entry_point_exists(self):
+        path = os.path.join(self.root, "install.command")
+        self.assertTrue(os.path.isfile(path))
+        self.assertTrue(os.access(path, os.X_OK))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

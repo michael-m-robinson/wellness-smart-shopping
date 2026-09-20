@@ -17,3 +17,6 @@ __pycache__/
 
 # Built app bundle
 app/build/
+
+# Installer output
+requirements/detected.txt

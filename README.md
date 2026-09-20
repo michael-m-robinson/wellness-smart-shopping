@@ -376,6 +376,29 @@ icon, backs up first, and re-signs so macOS still opens it. macOS only.
 ```bash
 git clone https://github.com/michael-m-robinson/wellness-smart-shopping.git
 cd wellness-smart-shopping
+./install.command          # or: python3 installer.py
+```
+
+The setup wizard checks what your machine already has, offers to fix what is
+missing, builds the desktop app, runs the tests and leaves you with a working
+control panel. **Nothing is installed without asking, and nothing needs `sudo`.**
+To look before you leap:
+
+```bash
+python3 installer.py --check     # report only, changes nothing
+```
+
+> **There are no Python packages to install.** The crawler, the control panel
+> and the wizard are standard library only, and the desktop app uses Apple's own
+> frameworks with no Swift package dependencies. `requirements/requirements.txt`
+> is deliberately empty -- nothing is downloaded at install time, nothing pins a
+> version, and nothing can break when an upstream package changes. The real
+> requirements are a handful of tools, listed in
+> [requirements/README.md](requirements/README.md) and checked by the wizard.
+
+Prefer to do it by hand? Copy the config and go:
+
+```bash
 cp config.example.json config.json
 ```
 
