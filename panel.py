@@ -24,7 +24,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
 
-from dealcrawler import branding, offers as offers_mod, stores as stores_mod, xmlout
+from dealcrawler import (branding, offers as offers_mod, profile as profile_mod,
+                         stores as stores_mod, xmlout)
 from dealcrawler.sources import harvest
 
 OUT_DIR = os.path.join(HERE, "out")
@@ -124,9 +125,32 @@ def page() -> str:
     brand = branding.load()
     hour = datetime.datetime.now().hour
     g = lambda k: html.escape(str(brand.get(k, "")))
-    theme = brand.get("theme") or "farm-market"
+    theme = brand.get("theme") or "50s-1"
+    theme_files = {t["name"]: t["file"] for t in branding.themes()}
+    banner_file = theme_files.get(theme) or next(iter(theme_files.values()), "")
     steps = brand.get("import_steps") or []
     steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in steps)
+    prof = profile_mod.load()
+    tgt = profile_mod.target(prof)
+    first_run = not profile_mod.exists()
+    presets = brand.get("list_message_presets") or []
+    msg_opts = "".join(
+        f'<option value="{html.escape(str(m))}">{html.escape(str(m))}</option>'
+        for m in presets)
+    meals_all = ["Breakfast", "Lunch", "Dinner", "Snacks"]
+    meals_html = "".join(
+        f'<label class="chk"><input type="checkbox" value="{m}"'
+        f'{" checked" if m in (prof.meals or []) else ""}> {m}</label>'
+        for m in meals_all)
+    sex_opts = "".join(
+        f'<option value="{k}"{" selected" if prof.sex == k else ""}>'
+        f'{html.escape(v[0])}</option>' for k, v in profile_mod.SEXES.items())
+    activity_opts = "".join(
+        f'<option value="{k}"{" selected" if prof.activity == k else ""}>'
+        f'{html.escape(v[0])}</option>' for k, v in profile_mod.ACTIVITY.items())
+    goal_opts = "".join(
+        f'<option value="{k}"{" selected" if prof.goal == k else ""}>'
+        f'{html.escape(v[0])}</option>' for k, v in profile_mod.GOALS.items())
     scan_steps = brand.get("scan_steps") or []
     scan_steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in scan_steps)
     stores_html = ""
@@ -143,11 +167,14 @@ def page() -> str:
             f'<code>{html.escape(st["path"])}</code></div>')
     themes_html = "".join(
         f'<button class="theme{" on" if t["name"] == theme else ""}" '
-        f'data-theme="{html.escape(t["name"])}" title="{html.escape(t["description"])}">'
-        f'<img src="/themes/{html.escape(t["file"])}" alt="{html.escape(t["name"])}">'
+        f'data-theme="{html.escape(t["name"])}" data-file="{html.escape(t["file"])}" '
+        f'title="{html.escape(t["description"])}">'
+        f'<img src="/themes/{html.escape(t["thumb"])}" loading="lazy" '
+        f'alt="{html.escape(t["name"])}">'
         f'<span>{html.escape(t["name"].replace("-", " "))}</span></button>'
         for t in branding.themes())
 
+    first_run_js = "true" if first_run else "false"
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -219,6 +246,29 @@ def page() -> str:
   dialog .inner{{padding:22px 24px}}
   dialog ol{{padding-left:20px;margin:0 0 14px}}
   dialog li{{margin-bottom:8px}}
+  .listmsg{{font-size:1.06rem;font-weight:600;margin:0 0 16px;
+    color:var(--accent);letter-spacing:.01em}}
+  @media (prefers-color-scheme: dark) {{
+    :root:not([data-theme="light"]) .listmsg{{color:var(--good)}}
+  }}
+  .targets{{display:flex;gap:10px;flex-wrap:wrap}}
+  .targets .t{{flex:1 1 92px;background:var(--bg);border-radius:10px;
+    padding:10px 12px;min-width:92px}}
+  .targets .t b{{display:block;font-size:1.28rem;line-height:1.2}}
+  .targets .t span{{font-size:.76rem;color:var(--muted);text-transform:uppercase;
+    letter-spacing:.05em}}
+  .grid2{{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}}
+  .pair{{display:flex;align-items:center;gap:6px}}
+  .pair input{{flex:1;min-width:0}}
+  .unit{{color:var(--muted);font-size:.85rem}}
+  select{{width:100%;font:inherit;padding:9px 11px;border-radius:9px;
+    border:1px solid var(--line);background:var(--bg);color:var(--ink)}}
+  input[type=number]{{width:100%;font:inherit;padding:9px 11px;border-radius:9px;
+    border:1px solid var(--line);background:var(--bg);color:var(--ink)}}
+  .meals{{display:flex;gap:14px;flex-wrap:wrap;margin-top:4px}}
+  .chk{{display:flex;align-items:center;gap:6px;font-size:.92rem;font-weight:500;
+    text-transform:none;letter-spacing:0;color:var(--ink);margin:0}}
+  @media (max-width:560px){{ .grid2{{grid-template-columns:1fr}} }}
   .store-help{{border-top:1px solid var(--line);padding:12px 0}}
   .store-help code{{display:block;margin-top:6px;font-size:.82rem;
     background:var(--bg);padding:8px 10px;border-radius:8px;word-break:break-all}}
@@ -237,7 +287,7 @@ def page() -> str:
 </style></head><body><div class="wrap">
 
 <header>
-  <img id="banner" src="/themes/{html.escape(theme)}.png" alt="">
+  <img id="banner" src="/themes/{html.escape(banner_file)}" alt="">
   <div class="veil"></div>
   <div class="txt">
     <h1 id="h-app">{g('app_name')}</h1>
@@ -251,6 +301,23 @@ def page() -> str:
   <button id="scan">{g('scan_button')}</button>
   <button id="howto">{g('import_button')}</button>
 </div>
+
+<div class="card" id="profile-card">
+  <div class="store-line">
+    <h2>{g('targets_header')}</h2>
+    <button id="editprofile" style="padding:6px 12px;font-size:.85rem">{g('profile_edit_button')}</button>
+  </div>
+  <div id="targets" class="targets">
+    <div class="t"><b id="t-cal">{tgt['calories']}</b><span>kcal / day</span></div>
+    <div class="t"><b id="t-pro">{tgt['protein']}g</b><span>protein</span></div>
+    <div class="t"><b id="t-car">{tgt['carbs']}g</b><span>carbs</span></div>
+    <div class="t"><b id="t-fat">{tgt['fat']}g</b><span>fat</span></div>
+    <div class="t"><b id="t-goal">{html.escape(tgt['goal_label'])}</b><span>goal</span></div>
+  </div>
+  <p class="muted" id="t-note" style="margin:10px 0 0">{g('targets_note')}</p>
+</div>
+
+<p class="listmsg" id="listmsg">{g('list_message')}</p>
 
 <div id="results"><div class="card"><h2>{g('deals_header')}</h2>
   <p class="muted">{g('deals_empty')}</p></div></div>
@@ -273,12 +340,103 @@ def page() -> str:
   <input type="text" id="f-tag" value="{g('tagline')}">
   <label for="f-deals">Deals heading</label>
   <input type="text" id="f-deals" value="{g('deals_header')}">
+  <label for="f-msg">Shopping list message</label>
+  <select id="f-msgpick"><option value="">Choose a message...</option>{msg_opts}</select>
+  <input type="text" id="f-msg" value="{g('list_message')}" style="margin-top:8px"
+         placeholder="Or write your own">
   <div class="row" style="margin:16px 0 0"><button id="save">{g('save_button')}</button>
     <span class="muted" id="saved" style="align-self:center"></span></div>
 </div>
 
 <p class="muted">{g('footer')}</p>
 </div>
+
+<dialog id="profiledlg"><div class="inner">
+  <h2>{g('profile_title')}</h2>
+  <p class="muted">{g('profile_intro')}</p>
+
+  <div class="grid2">
+    <div>
+      <label for="p-ft">Height</label>
+      <div class="pair">
+        <input type="number" id="p-ft" min="4" max="8" placeholder="5"
+               value="{prof.height_feet if prof.height_feet is not None else ''}">
+        <span class="unit">ft</span>
+        <input type="number" id="p-in" min="0" max="11" placeholder="10"
+               value="{prof.height_inches if prof.height_inches is not None else ''}">
+        <span class="unit">in</span>
+      </div>
+    </div>
+    <div>
+      <label for="p-wt">Weight</label>
+      <div class="pair">
+        <input type="number" id="p-wt" min="80" max="700" step="0.5" placeholder="185"
+               value="{prof.weight_pounds if prof.weight_pounds is not None else ''}">
+        <span class="unit">lb</span>
+      </div>
+    </div>
+    <div>
+      <label for="p-age">Age</label>
+      <div class="pair">
+        <input type="number" id="p-age" min="13" max="100" placeholder="38"
+               value="{prof.age if prof.age is not None else ''}">
+        <span class="unit">yrs</span>
+      </div>
+    </div>
+    <div>
+      <label for="p-sex">Sex</label>
+      <select id="p-sex">{sex_opts}</select>
+    </div>
+    <div>
+      <label for="p-goal">Goal</label>
+      <select id="p-goal">{goal_opts}</select>
+    </div>
+    <div>
+      <label for="p-diet">Diet</label>
+      <input type="text" id="p-diet" value="{html.escape(prof.diet)}"
+             placeholder="No restriction">
+    </div>
+    <div>
+      <label for="p-people">People</label>
+      <input type="number" id="p-people" min="1" max="12" value="{prof.people}">
+    </div>
+    <div>
+      <label for="p-days">Days to plan</label>
+      <input type="number" id="p-days" min="1" max="60" value="{prof.days}">
+    </div>
+    <div>
+      <label for="p-bmin">Budget min</label>
+      <input type="number" id="p-bmin" min="0" step="1" value="{prof.budget_min:g}">
+    </div>
+    <div>
+      <label for="p-bmax">Budget max</label>
+      <input type="number" id="p-bmax" min="0" step="1" value="{prof.budget_max:g}">
+    </div>
+  </div>
+
+  <label for="p-activity">Activity level</label>
+  <select id="p-activity">{activity_opts}</select>
+
+  <label>Meals to plan</label>
+  <div class="meals" id="p-meals">{meals_html}</div>
+
+  <div class="card" style="margin:16px 0 0;background:var(--bg)">
+    <h2 style="margin:0 0 8px">Your daily target</h2>
+    <div class="targets" id="preview">
+      <div class="t"><b id="v-cal">{tgt['calories']}</b><span>kcal</span></div>
+      <div class="t"><b id="v-pro">{tgt['protein']}g</b><span>protein</span></div>
+      <div class="t"><b id="v-car">{tgt['carbs']}g</b><span>carbs</span></div>
+      <div class="t"><b id="v-fat">{tgt['fat']}g</b><span>fat</span></div>
+    </div>
+    <p class="muted" id="v-note" style="margin:10px 0 0">{g('targets_note')}</p>
+  </div>
+
+  <div class="row" style="margin:16px 0 0">
+    <button class="primary" id="saveprofile">{g('profile_save_button')}</button>
+    <button id="profileclose">Close</button>
+    <span class="muted" id="psaved" style="align-self:center"></span>
+  </div>
+</div></dialog>
 
 <dialog id="scandlg"><div class="inner">
   <h2>{g('scan_title')}</h2>
@@ -305,6 +463,71 @@ def page() -> str:
 const $ = s => document.querySelector(s);
 const esc = s => String(s == null ? "" : s).replace(/[&<>"]/g,
   c => ({{'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}}[c]));
+
+const profDlg = $("#profiledlg");
+$("#editprofile").onclick = () => profDlg.showModal();
+$("#profileclose").onclick = () => profDlg.close();
+
+function profileBody() {{
+  const num = id => {{
+    const v = $(id).value.trim();
+    return v === "" ? null : Number(v);
+  }};
+  return {{
+    height_feet: num("#p-ft"), height_inches: num("#p-in"),
+    weight_pounds: num("#p-wt"), goal: $("#p-goal").value,
+    age: num("#p-age"), sex: $("#p-sex").value,
+    activity: $("#p-activity").value,
+    diet: $("#p-diet").value, people: num("#p-people") || 1,
+    days: num("#p-days") || 7,
+    budget_min: num("#p-bmin") || 0, budget_max: num("#p-bmax") || 0,
+    meals: Array.from(document.querySelectorAll("#p-meals input:checked"))
+                .map(c => c.value),
+  }};
+}}
+
+async function postProfile(preview) {{
+  const r = await fetch("/api/profile", {{
+    method: "POST", headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify(Object.assign({{preview: preview}}, profileBody()))}});
+  return r.json();
+}}
+
+function paint(t, scope) {{
+  $(scope + "cal").textContent = t.calories;
+  $(scope + "pro").textContent = t.protein + "g";
+  $(scope + "car").textContent = t.carbs + "g";
+  $(scope + "fat").textContent = t.fat + "g";
+}}
+
+let previewTimer = null;
+function schedulePreview() {{
+  clearTimeout(previewTimer);
+  previewTimer = setTimeout(async () => {{
+    try {{
+      const d = await postProfile(true);
+      paint(d.target, "#v-");
+      $("#v-note").textContent = d.target.personalised
+        ? "{g('targets_note')}"
+        : (d.complete
+           ? "{g('targets_note_partial')}"
+           : "Add your height and weight for a target sized to you.");
+    }} catch (e) {{}}
+  }}, 260);
+}}
+profDlg.querySelectorAll("input, select").forEach(
+  el => {{ el.oninput = schedulePreview; el.onchange = schedulePreview; }});
+
+$("#saveprofile").onclick = async () => {{
+  const d = await postProfile(false);
+  paint(d.target, "#t-");
+  paint(d.target, "#v-");
+  $("#t-goal").textContent = d.target.goal_label;
+  $("#psaved").textContent = "Saved";
+  setTimeout(() => {{ $("#psaved").textContent = ""; profDlg.close(); }}, 900);
+}};
+
+if ({first_run_js}) profDlg.showModal();
 
 $("#scan").onclick = () => $("#scandlg").showModal();
 $("#scanclose").onclick = () => $("#scandlg").close();
@@ -368,7 +591,7 @@ document.querySelectorAll(".theme").forEach(el => {{
   el.onclick = async () => {{
     const name = el.dataset.theme;
     await save({{theme: name}});
-    $("#banner").src = "/themes/" + name + ".png";
+    $("#banner").src = "/themes/" + el.dataset.file;
     document.querySelectorAll(".theme").forEach(x => x.classList.remove("on"));
     el.classList.add("on");
   }};
@@ -381,15 +604,25 @@ async function save(patch) {{
   return r.json();
 }}
 
+$("#f-msgpick").onchange = () => {{
+  if ($("#f-msgpick").value) {{
+    $("#f-msg").value = $("#f-msgpick").value;
+    $("#listmsg").textContent = $("#f-msgpick").value;
+  }}
+}};
+$("#f-msg").oninput = () => {{ $("#listmsg").textContent = $("#f-msg").value; }};
+
 $("#save").onclick = async () => {{
   await save({{
     app_name: $("#f-app").value, greeting_morning: $("#f-greet").value,
     greeting_afternoon: $("#f-greet").value, greeting_evening: $("#f-greet").value,
     tagline: $("#f-tag").value, deals_header: $("#f-deals").value,
+    list_message: $("#f-msg").value,
   }});
   $("#h-app").textContent = $("#f-app").value;
   $("#h-greet").textContent = $("#f-greet").value;
   $("#h-tag").textContent = $("#f-tag").value;
+  $("#listmsg").textContent = $("#f-msg").value;
   document.title = $("#f-app").value;
   $("#saved").textContent = "Saved";
   setTimeout(() => $("#saved").textContent = "", 1800);
@@ -416,9 +649,11 @@ class Handler(BaseHTTPRequestHandler):
         if path in ("/", "/index.html"):
             return self._send(200, page())
         if path.startswith("/themes/"):
-            name = os.path.basename(path)
-            full = os.path.join(branding.THEME_DIR, name)
-            if os.path.isfile(full):
+            rel = path[len("/themes/"):]
+            # Keep the request inside themes/ regardless of what was asked for.
+            full = os.path.normpath(os.path.join(branding.THEME_DIR, rel))
+            if (full.startswith(os.path.realpath(branding.THEME_DIR))
+                    or full.startswith(branding.THEME_DIR)) and os.path.isfile(full):
                 ctype = mimetypes.guess_type(full)[0] or "application/octet-stream"
                 with open(full, "rb") as fh:
                     return self._send(200, fh.read(), ctype)
@@ -451,6 +686,31 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
             finally:
                 _state["running"] = False
+
+        if path == "/api/profile":
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except ValueError:
+                return self._send(400, json.dumps({"error": "bad json"}),
+                                  "application/json")
+            preview = bool(body.pop("preview", False))
+            current = profile_mod.load()
+            fields = {f for f in profile_mod.Profile.__dataclass_fields__}
+            merged = {k: v for k, v in
+                      {**profile_mod.asdict(current), **body}.items() if k in fields}
+            try:
+                prof = profile_mod.Profile(**merged)
+            except TypeError as exc:
+                return self._send(400, json.dumps({"error": str(exc)}),
+                                  "application/json")
+            if not preview:
+                profile_mod.save(prof)
+            return self._send(200, json.dumps({
+                "profile": profile_mod.asdict(prof),
+                "target": profile_mod.target(prof),
+                "complete": prof.complete,
+                "saved": not preview,
+            }), "application/json")
 
         if path == "/api/branding":
             try:

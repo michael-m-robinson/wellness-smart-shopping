@@ -7,12 +7,29 @@
   "greeting_afternoon": "Good afternoon - let's shop well",
   "greeting_evening": "Good evening - let's plan the week",
   "use_time_greeting": true,
+  "list_message": "Good food, brighter days.",
+  "list_message_presets": [
+    "Good food, brighter days.",
+    "Stronger, healthier, happier you.",
+    "Progress looks good on you.",
+    "Eat well. Spend less. Feel better.",
+    "Small choices, every week.",
+    "Real food, real savings.",
+    "This week's plan, sized to you."
+  ],
   "deals_header": "This week's deals, matched to your list",
   "deals_empty": "No deals matched your staples yet. Try Refresh Deals.",
   "signin_header": "These stores need you signed in",
   "signin_body": "Grocers show their coupons only to a signed-in session. Open the store, sign in, then refresh.",
   "themes_header": "Choose a look",
   "output_header": "Files ready to import",
+  "targets_header": "Your daily target",
+  "targets_note": "Calories use the Mifflin-St Jeor equation with your activity level. Planning guidance only - it cannot account for medication, health history or body composition. If you have medical needs, use your clinician's numbers.",
+  "targets_note_partial": "Add your age for a target based on the Mifflin-St Jeor equation. Showing a size-only estimate.",
+  "profile_title": "Set your daily targets",
+  "profile_intro": "A couple of details set your calorie and macro targets, so the shopping list is sized to you. Saved on this machine only, and you can change it whenever you like.",
+  "profile_edit_button": "Edit",
+  "profile_save_button": "Save targets",
   "scan_button": "How to Scan",
   "refresh_button": "Refresh Deals",
   "refresh_working": "Checking stores...",
@@ -38,5 +55,5 @@
   ],
   "import_note": "Advertised prices change. Always check your receipt.",
   "footer": "Free and open source. Bring your own stores and accounts.",
-  "theme": "farm-market"
+  "theme": "50s-1"
 }

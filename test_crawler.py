@@ -283,5 +283,176 @@ class TestNoNetworkAccess(unittest.TestCase):
         self.assertNotIn("costco", keys)
 
 
+class TestProfileTargets(unittest.TestCase):
+    """Ported from the desktop app's personalizedNutritionTarget, so the panel
+    and the app must not drift apart on a user's numbers."""
+
+    def setUp(self):
+        from dealcrawler import profile
+        self.profile = profile
+
+    def test_incomplete_profile_uses_the_apps_fallback(self):
+        t = self.profile.target(self.profile.Profile())
+        self.assertEqual((t["protein"], t["carbs"], t["fat"]), (126, 261, 58))
+        self.assertFalse(t["estimated"])
+
+    def test_known_profile_matches_the_apps_arithmetic(self):
+        p = self.profile.Profile(height_feet=5, height_inches=10,
+                                 weight_pounds=185, goal="maintenance")
+        t = self.profile.target(p)
+        # maintenance = round((185*10 + 70*4)/10)*10
+        self.assertEqual(t["maintenance"], 2130)
+        self.assertEqual(t["protein"], 130)   # 185 * 0.70, planning weight capped
+        self.assertEqual(t["fat"], 59)        # 185 * 0.32
+        self.assertEqual(t["calories"],
+                         t["protein"] * 4 + t["carbs"] * 4 + t["fat"] * 9)
+
+    def test_goal_changes_the_multiplier(self):
+        base = dict(height_feet=5, height_inches=10, weight_pounds=185)
+        cut = self.profile.target(self.profile.Profile(goal="cutting", **base))
+        bulk = self.profile.target(self.profile.Profile(goal="buildMuscle", **base))
+        self.assertLess(cut["calories"], bulk["calories"])
+        self.assertEqual(cut["multiplier"], 0.84)
+        self.assertEqual(bulk["multiplier"], 1.10)
+
+    def test_planning_weight_is_capped_for_larger_bodies(self):
+        """Protein/fat come off a capped planning weight, not raw body weight."""
+        p = self.profile.Profile(height_feet=5, height_inches=6, weight_pounds=400)
+        t = self.profile.target(p)
+        self.assertLess(t["planning_weight"], 400)
+
+    def test_floors_are_respected(self):
+        p = self.profile.Profile(height_feet=4, height_inches=10, weight_pounds=80)
+        t = self.profile.target(p)
+        self.assertGreaterEqual(t["protein"], 60)
+        self.assertGreaterEqual(t["fat"], 40)
+        self.assertGreaterEqual(t["carbs"], 100)
+
+    def test_out_of_range_falls_back(self):
+        p = self.profile.Profile(height_feet=3, height_inches=0, weight_pounds=50)
+        self.assertFalse(p.complete)
+        self.assertFalse(self.profile.target(p)["estimated"])
+
+    def test_portion_multiplier_is_bounded(self):
+        for w in (80, 185, 700):
+            p = self.profile.Profile(height_feet=5, height_inches=10, weight_pounds=w)
+            self.assertGreaterEqual(self.profile.portion_multiplier(p), 0.60)
+            self.assertLessEqual(self.profile.portion_multiplier(p), 1.60)
+
+    def test_unknown_goal_falls_back_to_maintenance(self):
+        p = self.profile.Profile(goal="nonsense")
+        self.assertEqual(p.goal, "maintenance")
+
+    def test_panel_renders_the_form(self):
+        import panel
+        html_out = panel.page()
+        for needle in ('id="profiledlg"', 'id="p-ft"', 'id="p-wt"',
+                       'id="saveprofile"', 'id="t-cal"'):
+            self.assertIn(needle, html_out)
+
+
+class TestAgeSexActivity(unittest.TestCase):
+    """Calories should respond to age, sex and activity, not just body size."""
+
+    def setUp(self):
+        from dealcrawler import profile
+        self.profile = profile
+        self.base = dict(height_feet=5, height_inches=10, weight_pounds=185)
+
+    def _t(self, **kw):
+        return self.profile.target(self.profile.Profile(**dict(self.base, **kw)))
+
+    def test_age_switches_to_mifflin(self):
+        self.assertEqual(self._t()["basis"], "size-only")
+        self.assertEqual(self._t(age=38)["basis"], "mifflin")
+
+    def test_older_age_lowers_calories(self):
+        young = self._t(age=25, sex="male", activity="moderate")
+        older = self._t(age=65, sex="male", activity="moderate")
+        self.assertLess(older["maintenance"], young["maintenance"])
+
+    def test_sex_changes_calories(self):
+        male = self._t(age=38, sex="male", activity="moderate")
+        female = self._t(age=38, sex="female", activity="moderate")
+        self.assertGreater(male["maintenance"], female["maintenance"])
+
+    def test_unspecified_sex_sits_between(self):
+        vals = {s: self._t(age=38, sex=s, activity="moderate")["maintenance"]
+                for s in ("male", "female", "unspecified")}
+        self.assertLess(vals["female"], vals["unspecified"])
+        self.assertLess(vals["unspecified"], vals["male"])
+
+    def test_activity_raises_calories(self):
+        last = 0
+        for level in ("sedentary", "light", "moderate", "active", "athlete"):
+            cals = self._t(age=38, sex="male", activity=level)["maintenance"]
+            self.assertGreater(cals, last, level)
+            last = cals
+
+    def test_activity_also_raises_protein(self):
+        """Extra energy must not land almost entirely in carbohydrate."""
+        low = self._t(age=38, sex="male", activity="sedentary")
+        high = self._t(age=38, sex="male", activity="athlete")
+        self.assertGreater(high["protein"], low["protein"])
+
+    def test_fat_holds_a_quarter_of_calories(self):
+        for level in ("sedentary", "moderate", "athlete"):
+            t = self._t(age=38, sex="male", activity=level)
+            share = t["fat"] * 9 / t["calories"]
+            self.assertGreater(share, 0.20, level)
+
+    def test_unknown_sex_or_activity_falls_back(self):
+        p = self.profile.Profile(sex="nope", activity="nope")
+        self.assertEqual(p.sex, self.profile.DEFAULT_SEX)
+        self.assertEqual(p.activity, self.profile.DEFAULT_ACTIVITY)
+
+    def test_age_out_of_range_is_not_personalised(self):
+        self.assertEqual(self._t(age=5)["basis"], "size-only")
+
+    def test_panel_form_offers_the_new_fields(self):
+        import panel
+        html_out = panel.page()
+        for needle in ('id="p-age"', 'id="p-sex"', 'id="p-activity"'):
+            self.assertIn(needle, html_out)
+
+
+class TestThemeLibrary(unittest.TestCase):
+    def test_photo_themes_are_present(self):
+        from dealcrawler import branding
+        names = {t["name"] for t in branding.themes()}
+        self.assertTrue({"50s-1", "fit-1", "nature-1", "family"} <= names)
+
+    def test_every_theme_has_a_thumbnail(self):
+        from dealcrawler import branding
+        for t in branding.themes():
+            self.assertTrue(t["thumb"].startswith("thumbs/"), t["name"])
+            full = os.path.join(branding.THEME_DIR, t["thumb"])
+            self.assertTrue(os.path.isfile(full), t["thumb"])
+
+    def test_thumbs_directory_is_not_listed_as_a_theme(self):
+        from dealcrawler import branding
+        self.assertNotIn("thumbs", {t["name"] for t in branding.themes()})
+
+    def test_banner_uses_the_real_file_extension(self):
+        import panel
+        import re as _re
+        src = _re.search(r'id="banner" src="/themes/([^"]+)"', panel.page()).group(1)
+        self.assertTrue(src.endswith((".jpg", ".png", ".jpeg")), src)
+
+
+class TestListMessage(unittest.TestCase):
+    def test_message_and_presets_exist(self):
+        from dealcrawler import branding
+        brand = branding.load()
+        self.assertTrue(brand["list_message"])
+        self.assertGreaterEqual(len(brand["list_message_presets"]), 3)
+
+    def test_message_renders_and_is_pickable(self):
+        import panel
+        html_out = panel.page()
+        self.assertIn('id="listmsg"', html_out)
+        self.assertIn('id="f-msgpick"', html_out)
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

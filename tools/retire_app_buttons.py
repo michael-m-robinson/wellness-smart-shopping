@@ -20,16 +20,25 @@ A timestamped backup is taken first and the bundle is re-signed afterwards.
 
 import argparse
 import datetime
+import re
 import os
 import shutil
 import subprocess
 import sys
 
+# --- exact replacements -----------------------------------------------------
 # original -> replacement. Replacements must not exceed the original length;
 # they are space-padded to match it exactly.
 RETIREMENTS = [
-    (b"Find Official Offers",
-     b"Use Control Panel"),
+    (b"Find & Apply Coupons...", b"Scan with Claude..."),
+    (b"Find Official Offers", b"Use Control Panel"),
+    (b", use Find & Apply Coupons ", b", use Scan with Claude "),
+    (b"Import coupon text copied from the selected official store page",
+     b"Retired - use the control panel, then Import Sales XML"),
+    (b"Sign in on the official page, open its coupon list, then Scan All Offers "
+     b"(it auto-scrolls the whole list). Passwords stay inside the retailer page.",
+     b"Retired. The control panel's How to Scan explains this per store, and "
+     b"writes a file you import below."),
     (b"Scans accessible official offers and applies strong item matches to the "
      b"estimate. For BJ's or ShopRite, Connect opens the official sign-in page "
      b"and keeps its session cookie; this app never reads or stores the "
@@ -38,13 +47,85 @@ RETIREMENTS = [
      b"Retired. Run 'python3 panel.py' and press How to Scan for step-by-step, "
      b"per-store directions on reading a store's coupon list from your "
      b"signed-in browser, then Import Sales XML here."),
-    (b"Import coupon text copied from the selected official store page",
-     b"Retired - use the control panel, then Import Sales XML"),
-    (b"Sign in on the official page, open its coupon list, then Scan All Offers "
-     b"(it auto-scrolls the whole list). Passwords stay inside the retailer page.",
-     b"Retired. The control panel's How to Scan explains this per store, and "
-     b"writes a file you import below."),
+    (b"Scanned the full page but found no strong shopping-list matches. Open the "
+     b"coupon list (not the store home page), then scan again.",
+     b"Retired. Use the control panel: 'python3 panel.py' > How to Scan, then "
+     b"Import Sales XML here."),
+    (b"Apply ShopRite web-circular sales?", b"Retired - scan with Claude"),
+    (b"ShopRite Weekly Sales - public circular", b"Retired - scan with Claude"),
+    (b"Matched from this week's public ShopRite circular. These are advertised "
+     b"sale prices (savings estimated vs. the app's normal price), not card-clip "
+     b"digital coupons ",
+     b"Retired. Scan the store with Claude for its own numbers, then use Import "
+     b"Sales XML. "),
 ]
+
+# --- prefix rules -----------------------------------------------------------
+# Some strings embed the town the original build was made for. Matching them by
+# a neutral prefix means this file never has to carry anybody's address, and the
+# rule still works on a build personalised for somewhere else.
+PREFIX_RULES = [
+    (b"Local Coupon Finder & Applier - ",
+     b"Deals are scanned from your signed-in browser"),
+    (b"Ready to check ",
+     b"Run 'python3 panel.py' and press How to Scan. Claude reads the coupon "
+     b"list from the store page you are signed in to."),
+    (b"Read this week's ShopRite circular from a public deals site",
+     b"Retired. Deals no longer come from third-party coupon sites. Scan your "
+     b"store with Claude instead, then use Import Sales XML below."),
+]
+
+# --- pattern rules ----------------------------------------------------------
+# Store pickers in the original build are labelled with real branch addresses.
+# Anyone handed the app would be reading a stranger's neighbourhood, so these
+# are matched structurally and replaced with a neutral label.
+LOCATION_PATTERNS = [
+    (re.compile(rb"^[A-Z][A-Za-z.'\- ]{2,30} - store \d{1,6}$"), b"Your store"),
+    (re.compile(rb"^[A-Z][A-Za-z.'\- ]{2,30} - \d{1,6} [A-Za-z.'\- ]{2,28}"
+                rb"(?:Rd|Road|St|Street|Ave|Avenue|Blvd|Hwy|Pike|Way|Ln|Dr)$"),
+     b"Your local branch"),
+]
+
+# A store link pinned to one branch is likewise personal; keep the chain only.
+URL_PATTERNS = [
+    (re.compile(rb"^https://www\.shoprite\.com/sm/planning/rsid/\d+/[^\s]*$"),
+     b"https://www.shoprite.com/"),
+    # Stop the app reaching third-party coupon blogs at all.
+    (re.compile(rb"^https://(?:www\.)?livingrichwithcoupons\.com/[^\s]*$"),
+     b"https://www.shoprite.com/"),
+]
+
+
+def _printable_strings(data: bytes):
+    """Every printable, NUL-terminated run in the binary, with its offset."""
+    for m in re.finditer(rb"[\x20-\x7e]{6,400}", data):
+        yield m.start(), m.group(0)
+
+
+def build_rules(data: bytes):
+    """Exact rules, plus any prefix/pattern matches found in this binary."""
+    rules = list(RETIREMENTS)
+    for prefix, replacement in PREFIX_RULES:
+        idx = data.find(prefix)
+        if idx < 0:
+            continue
+        end = idx
+        while end < len(data) and 0x20 <= data[end] <= 0x7E:
+            end += 1
+        rules.append((data[idx:end], replacement))
+    for off, text in _printable_strings(data):
+        for pattern, replacement in LOCATION_PATTERNS + URL_PATTERNS:
+            if pattern.match(text):
+                rules.append((text, replacement))
+                break
+    # Longest first so a rule can never be shadowed by a substring of itself.
+    seen, ordered = set(), []
+    for original, replacement in sorted(rules, key=lambda r: -len(r[0])):
+        if original in seen:
+            continue
+        seen.add(original)
+        ordered.append((original, replacement))
+    return ordered
 
 
 def exe_path(app: str):
@@ -94,7 +175,7 @@ def main(argv=None):
     data = bytearray(open(exe, "rb").read())
     changes, missing = [], []
 
-    for original, replacement in RETIREMENTS:
+    for original, replacement in build_rules(bytes(data)):
         if len(replacement) > len(original):
             print(f"  ! replacement longer than original, skipping: "
                   f"{replacement[:40]!r}", file=sys.stderr)

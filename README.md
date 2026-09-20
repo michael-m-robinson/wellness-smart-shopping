@@ -109,6 +109,65 @@ anything on your behalf. It only ever reads a file you saved.
 
 ---
 
+## Your daily targets
+
+The first time you open the control panel it asks for a few details and works
+out the calorie and macro targets your shopping list is sized around:
+
+<p align="center"><img src="docs/img/daily-targets.jpg" alt="The Set your daily targets form: height, weight, goal, diet, people, days, budget and meals, with a live daily target showing kcal, protein, carbs and fat" width="760"></p>
+
+Height, weight, age, sex, activity and goal set the numbers -- the rest size the
+shop itself. The target updates live as you type, so you can see what switching
+from Maintenance to Cutting, or from Sedentary to Active, actually costs before
+committing.
+
+Press **Save targets** and it is written to `profile.json` on your machine and
+reused from then on. Change it any time with **Edit** on the targets card; there
+is no lock-in and nothing is uploaded.
+
+### How the numbers are worked out
+
+Calories come from the **Mifflin-St Jeor equation** -- the resting-energy formula
+dietitians use -- multiplied by an activity factor:
+
+| Activity | Factor | Extra protein |
+| --- | --- | --- |
+| Sedentary - little or no exercise | 1.20 | - |
+| Light - 1-3 days a week | 1.375 | +0.05 g/lb |
+| Moderate - 3-5 days a week | 1.55 | +0.08 g/lb |
+| Active - 6-7 days a week | 1.725 | +0.12 g/lb |
+| Very active - physical job or twice daily | 1.90 | +0.15 g/lb |
+
+Training harder raises protein need, not just calories. Without that, the extra
+energy would land almost entirely in carbohydrate, which is a poor split for
+anyone actually training. Fat is likewise held to at least a quarter of
+calories, so a high-activity target does not collapse into a near pure-carb plan.
+
+Your goal then scales the result:
+
+| Goal | Calories | Protein | Fat |
+| --- | --- | --- | --- |
+| Build Muscle | maintenance x 1.10 | 0.80 g/lb | 0.35 g/lb |
+| Maintenance | maintenance x 1.00 | 0.70 g/lb | 0.32 g/lb |
+| Cutting | maintenance x 0.84 | 0.75 g/lb | 0.30 g/lb |
+
+Protein and fat come off a *planning weight* capped near BMI 25 plus 20%, so
+targets stay sensible across body sizes rather than scaling without limit.
+Carbohydrate fills the remaining calories.
+
+**Sex** offers "Prefer not to say", which sits midway between the male and
+female constants -- you get a usable number without disclosing it.
+
+If you leave age blank, it falls back to the desktop app's original size-only
+estimate, so an unfinished profile still produces workable numbers. There are
+tests pinning both paths.
+
+> **This is planning guidance, not clinical advice.** It cannot account for
+> medication, health history, body composition or pregnancy. If you have medical
+> or dietary needs, use the numbers your clinician gives you.
+
+---
+
 ## The control panel
 
 The easiest way to use this. One command:
@@ -120,6 +179,7 @@ python3 panel.py
 It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
+- **Your daily target** -- calories and macros sized to you, editable any time.
 - **Refresh Deals** -- checks every enabled store and writes the XML.
 - **How to Scan** -- step-by-step directions for reading a store's coupon list
   from your signed-in browser, with the exact page to open and the exact
@@ -127,9 +187,9 @@ nothing uploaded anywhere -- with:
 - **How to Import** -- step-by-step import instructions in a popup.
 - **A sign-in panel** -- any store that needs an account is listed with a link
   to open it and instructions for the browser harvest.
-- **A look picker** -- six bundled images, or drop your own into `themes/`.
-- **Wording** -- edit the app name, greeting, tagline and headings, and they
-  save straight to `branding.json`.
+- **A look picker** -- 26 bundled images, or drop your own into `themes/`.
+- **Wording** -- edit the app name, greeting, tagline, headings and the
+  shopping list message; all save straight to `branding.json`.
 
 <p align="center"><img src="docs/img/control-panel.jpg" alt="The control panel: banner with a custom greeting, Refresh Deals and How to Import buttons, matched deals, and a theme picker" width="820"></p>
 
@@ -229,15 +289,31 @@ from the control panel and hit Save.
 
 ### Choosing a look
 
-Six images ship with the project: `fresh-greens`, `farm-market`, `citrus`,
-`berry`, `harvest`, `ocean-calm`.
+Twenty-six images ship with the project, in two kinds:
 
-They are **drawn by code, not downloaded** (`tools/make_themes.py`), so they
-carry no third-party licence and you can redistribute them freely with the rest
-of the project. Want a photo instead? Drop any `.png` or `.jpg` into `themes/`
-and it appears in the picker. Good sources for genuinely free photography are
-Unsplash, Pexels, Openverse and Wikimedia Commons -- check each image's licence
-before you redistribute it.
+- **Six drawn by code** (`tools/make_themes.py`) -- abstract produce artwork that
+  carries no third-party licence at all.
+- **Twenty photographs** -- retro 1950s grocery scenes, training and strength,
+  open air and green space, and a family at the table.
+
+Pick one in the control panel and it becomes the banner; `personalize.py` can
+push the same image into the desktop app. Drop any `.png` or `.jpg` into
+`themes/` and it appears in the picker too. The grid loads small thumbnails
+from `themes/thumbs/` so a large library stays quick.
+
+Good sources for more free photography are Unsplash, Pexels, Openverse and
+Wikimedia Commons -- check each image's licence before redistributing it.
+
+### Your shopping list message
+
+The line above your shopping list is yours. Pick one of the presets in
+**Wording**, or type your own:
+
+> Good food, brighter days. &nbsp;&middot;&nbsp; Stronger, healthier, happier
+> you. &nbsp;&middot;&nbsp; Progress looks good on you. &nbsp;&middot;&nbsp;
+> Eat well. Spend less. Feel better.
+
+It saves to `branding.json` with everything else.
 
 ### Renaming and re-skinning the desktop app
 
@@ -381,10 +457,12 @@ a script, or by hand — this crawler is just one producer.
   network requests of any kind.
 - The panel binds to `127.0.0.1` only -- it is not reachable from
   your network.
+- Your height, weight and goal stay in `profile.json` on your machine.
 - **It never sees, asks for, or stores your store passwords.** Sign-in happens
   in your own browser; only the visible text of a page you already opened is
   ever read.
-- `config.json`, `branding.json`, `harvest/` and `out/` are git-ignored so your store numbers and
+- `config.json`, `branding.json`, `profile.json`, `harvest/` and `out/`
+  are git-ignored so your store numbers and
   local data stay off GitHub.
 
 ---

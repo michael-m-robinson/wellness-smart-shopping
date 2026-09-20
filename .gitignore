@@ -1,6 +1,7 @@
 # Local configuration: contains your own store numbers
 config.json
 branding.json
+profile.json
 
 # Fetched store pages and generated output
 harvest/*.txt

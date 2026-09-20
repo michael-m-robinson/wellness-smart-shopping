@@ -137,15 +137,29 @@ def main(argv=None):
 
     # --- picture -----------------------------------------------------------
     if args.theme:
-        src = os.path.join(branding.THEME_DIR, f"{args.theme}.png")
-        if not os.path.isfile(src):
+        src = ""
+        for ext in (".png", ".jpg", ".jpeg"):
+            candidate = os.path.join(branding.THEME_DIR, f"{args.theme}{ext}")
+            if os.path.isfile(candidate):
+                src = candidate
+                break
+        if not src:
             print(f"  ! no theme called {args.theme!r}; try --list", file=sys.stderr)
             return 1
         dest = os.path.join(contents, "Resources", args.image_resource)
         if not os.path.isfile(dest):
             print(f"  ! this bundle has no {args.image_resource} to replace")
         else:
-            shutil.copyfile(src, dest)
+            # The bundle's filename is fixed, so a JPEG theme is converted to
+            # PNG on the way in rather than renamed.
+            if os.path.splitext(src)[1].lower() in (".jpg", ".jpeg"):
+                try:
+                    subprocess.run(["sips", "-s", "format", "png", src,
+                                    "--out", dest], check=True, capture_output=True)
+                except (subprocess.CalledProcessError, FileNotFoundError):
+                    shutil.copyfile(src, dest)
+            else:
+                shutil.copyfile(src, dest)
             print(f"  image  -> {args.theme}")
             changed = True
         if args.icon:
