@@ -277,6 +277,14 @@ panel that does three things and nothing else:
 The per-item list of entry boxes is gone -- deals arrive from a scan, so there
 was nothing left to type into it.
 
+> **Keep the app next to the project folder, and keep Python 3 installed.**
+> **Start Control Panel** runs `panel.py` for you, so it has to be able to find
+> it. It looks in a folder you picked before, then beside the app, then the
+> usual download and clone locations. **If you move the app somewhere unrelated
+> it will ask you to point at the folder once**, and remember your answer after
+> that. **Without Python 3 the button cannot start anything** -- the rest of the
+> app still works, and you can always import a sales file by hand.
+
 What survived untouched: the meal planner, recipes, PDF export, nutrition
 targets, and the XML import. The app's own self-test still passes:
 
