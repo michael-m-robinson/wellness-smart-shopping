@@ -58,7 +58,50 @@ DEFAULTS: Dict[str, str] = {
                       "machine only, and you can change it whenever you like."),
     "profile_edit_button": "Edit",
     "profile_save_button": "Save targets",
-    "scan_button": "How to Scan",
+    # Claude for Chrome. A page cannot reliably detect an extension -- the
+    # resources it exposes are content-hashed and change on every release -- so
+    # this informs rather than claims, and can be dismissed for good.
+    "extension_id": "fcoeoabgfenejglbffodgkkbkcdhcgfn",
+    "extension_url": ("https://chromewebstore.google.com/detail/"
+                      "fcoeoabgfenejglbffodgkkbkcdhcgfn"),
+    "extension_title": "Scanning needs the Claude for Chrome extension",
+    "extension_body": ("Scan with Claude reads deals from the store page you "
+                       "are signed in to, which the Claude for Chrome extension "
+                       "makes possible. Everything else here works without it."),
+    "extension_wrong_browser": ("This browser cannot run the Claude for Chrome "
+                                "extension. Open the panel in Google Chrome to "
+                                "use Scan with Claude."),
+    "extension_install": "Get the extension",
+    "extension_have": "I already have it",
+
+    "scan_button": "Scan with Claude",
+    "scan_help_button": "How to Scan",
+
+    # The wizard. {store} and {path} are filled in for the chosen store.
+    "scan_pick_title": "Which store shall I scan?",
+    "scan_pick_intro": ("Pick a store, sign in to it, and Claude will read this "
+                        "week's deals straight off the page."),
+    "scan_wait_title": "Scanning {store}",
+    "scan_prompt": ("Scan this page for deals with browser/harvest.js and save "
+                    "the result to {path}"),
+    "scan_wait_body": ("Open the store below and sign in, then give Claude this "
+                       "instruction in the Chrome side panel. I'll watch for the "
+                       "result and pick it up automatically."),
+    "scan_waiting": "Waiting for the scan to finish...",
+    "scan_done_title": "{store}: {count} deals found",
+    "scan_done_body": "Your sales file is ready. Import it now?",
+    "scan_none_title": "{store}: nothing matched",
+    "scan_none_body": ("The scan came through, but none of the offers matched "
+                       "the staples on your list. That just means a quiet week "
+                       "at this store."),
+    "scan_import_now": "Import deals now",
+    "scan_import_later": "Not now",
+    "scan_later_title": "Saved for later",
+    "scan_later_body": ("No problem - your deals are saved and will keep. When "
+                        "you're ready, open the app, choose Import Sales XML..., "
+                        "and pick this file:"),
+    "scan_imported_body": ("Opened the app and revealed the file in Finder. "
+                           "Choose Import Sales XML... and pick:"),
     "refresh_button": "Refresh Deals",
     "refresh_working": "Checking stores...",
     "import_button": "How to Import",
@@ -111,11 +154,26 @@ def _read(path: str) -> dict:
 
 
 def load() -> dict:
-    """Defaults <- branding.example.json <- branding.json."""
+    """Defaults <- branding.json.
+
+    branding.example.json is a copy-me template, deliberately NOT part of this
+    chain: when it was, a stale checked-in copy silently shadowed newly added
+    defaults, so the app showed old wording that no longer existed in the code.
+    """
     merged = dict(DEFAULTS)
-    merged.update(_read(EXAMPLE_FILE))
     merged.update(_read(USER_FILE))
     return merged
+
+
+def write_example() -> str:
+    """Regenerate the template from DEFAULTS so the two cannot drift."""
+    payload = {"_comment": "Copy this to branding.json and change anything. "
+                           "Every string here is yours to edit.",
+               **DEFAULTS}
+    with open(EXAMPLE_FILE, "w", encoding="utf-8") as fh:
+        json.dump(payload, fh, indent=2)
+        fh.write("\n")
+    return EXAMPLE_FILE
 
 
 def save(updates: dict) -> dict:

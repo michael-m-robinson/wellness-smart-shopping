@@ -84,7 +84,7 @@ cut, because the numbers are on their side.
 | Requirement | Why |
 | --- | --- |
 | **A Claude subscription** | Required. Every store is read by Claude from your own browser. |
-| **The Claude for Chrome extension** | Required. This is what runs the scan inside the store page you are signed in to. |
+| **[The Claude for Chrome extension](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn)** | Required for scanning. The panel links you to it if it is missing. |
 | **Python 3.9+** | The crawler itself. Standard library only — nothing to install. |
 | **Chrome, signed in to your stores** | Digital coupons and member pricing only exist inside your own logged-in session. |
 | No network access of its own | This program never contacts a store. A test enforces it. |
@@ -179,11 +179,10 @@ python3 panel.py
 It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
+- **Scan with Claude** -- pick a store, Claude reads its deals from the page
+  you are signed in to, and the panel offers to import the result.
 - **Your daily target** -- calories and macros sized to you, editable any time.
 - **Refresh Deals** -- checks every enabled store and writes the XML.
-- **How to Scan** -- step-by-step directions for reading a store's coupon list
-  from your signed-in browser, with the exact page to open and the exact
-  command to run, per store.
 - **How to Import** -- step-by-step import instructions in a popup.
 - **A sign-in panel** -- any store that needs an account is listed with a link
   to open it and instructions for the browser harvest.
@@ -195,74 +194,92 @@ nothing uploaded anywhere -- with:
 
 <p align="center"><em>Refresh, see what matched, import. That's the loop.</em></p>
 
-### Scanning a store
+### Scan with Claude
 
-Every store is read the same way: from a page you are signed in to. **How to
-Scan** in the control panel gives you the link to open and the exact file to
-save, per store:
+**Scan with Claude** runs the whole loop for you. Press it, pick a store, and
+the panel hands you the exact instruction to give Claude:
 
-<p align="center"><img src="docs/img/how-to-scan.jpg" alt="The How to Scan popup: five numbered steps, then a card per store showing whether it reads without signing in or needs sign-in, with links to its coupon list and weekly ad and the harvest command to run" width="720"></p>
+<p align="center"><img src="docs/img/scan-with-claude.jpg" alt="The Scan with Claude wizard: links to the store's coupon list and weekly ad, the instruction to give Claude with a Copy button, and a spinner waiting for the scan" width="720"></p>
 
-The short version:
-
-1. Sign in to the store in Chrome.
-2. Open its weekly ad or digital coupon list and scroll once so every offer loads.
-3. Ask Claude, with the Claude for Chrome extension enabled:
-   *"run browser/harvest.js on this tab"*.
-4. Claude scrolls the whole list and prints one offer per line. Save that as
-   `harvest/shoprite.txt` (the panel shows the exact path for each store).
-5. Press **Refresh Deals**, or run:
-
-```bash
-python3 crawl.py
-```
-
-`examples/sample-scan.txt` shows the shape of a scan if you want to try the
-pipeline before scanning anything real:
+1. **Pick a store.** Each one shows whether it has been scanned yet.
+2. **Open it and sign in.** The panel links straight to that store's coupon list
+   and weekly ad.
+3. **Give Claude the instruction** (there is a Copy button) in the Chrome side
+   panel, with the Claude for Chrome extension enabled.
+4. **The panel watches for the result.** When Claude saves the scan, it is
+   picked up automatically, matched against your staples, and turned into XML --
+   no further clicking.
+5. **It asks whether to import.** Say yes and it opens the app and reveals the
+   file in Finder, with the path on your clipboard. Say **Not now** and it tells
+   you exactly where the file is waiting, so you can import whenever you like:
 
 ```
-Boneless Skinless Chicken Breast | $1.99/lb | Limit 4
-93% Lean Ground Turkey | $3.49 | Limit 2
-Large Eggs 18 ct | $2.49 |
+/path/to/wellness-smart-shopping/out/shoprite-sales-2026-09-20.xml
 ```
 
-```bash
-python3 crawl.py --harvest shoprite=examples/sample-scan.txt --report
-```
+Nothing is lost by declining -- the file keeps until you use **Import Sales
+XML...** in the app. If the scan came through but nothing matched your staples,
+it says so plainly rather than writing an empty file; that is just a quiet week
+at that store.
 
-Your password never leaves the store's own site -- scanning only reads the
-visible text of a page you already opened. If you are signed out,
-`harvest.js` says so rather than handing back an empty list.
+#### If you do not have the extension yet
 
-### Retiring the app's old coupon button
+The panel says so on arrival, with a link to install it:
 
-The bundled desktop app carries an older built-in "Find Official Offers" /
-Connect Account panel that predates this project. Scanning replaces it: it
-handles more stores, honours purchase limits, and writes a file the app imports
-directly.
+> **Scanning needs the Claude for Chrome extension** -- Scan with Claude reads
+> deals from the store page you are signed in to, which the Claude for Chrome
+> extension makes possible. Everything else here works without it.
+> &nbsp; [Get the extension] &nbsp; [I already have it]
 
-The app is a compiled binary with no source, so that button cannot be deleted --
+Press **I already have it** and the notice never comes back. Open the panel in a
+browser that cannot run the extension and it says that instead.
+
+A web page cannot truly detect an installed extension -- the resources this one
+exposes are content-hashed and change with every release, so probing for them
+would start reporting "missing" after any update. The notice therefore informs
+rather than claims, and is dismissible. Only the browser itself is detected with
+certainty.
+
+**How to Scan** (inside the wizard) has the same directions in longhand if you
+would rather read them first.
+
+### Retiring the app's old coupon panel
+
+The bundled desktop app carries a built-in coupon finder that predates this
+project -- "Find & Apply Coupons", Connect Account, Scan All Offers. It is
+retired: scanning replaces it, handles more stores, honours purchase limits,
+and writes a file the app imports directly.
+
+The app is a compiled binary with no source, so the button cannot be deleted --
 deleting it means changing code, and there is no code to change. It can,
-however, be **relabelled in place** so nobody walks into the dead end:
+however, be **relabelled in place**, and its panel turned into scanning
+directions:
 
 ```bash
 python3 tools/retire_app_buttons.py --app "/Applications/Your App.app" --dry-run
 python3 tools/retire_app_buttons.py --app "/Applications/Your App.app"
 ```
 
-"Find Official Offers" becomes "Use Control Panel", and the panel's help text
-points at `panel.py` > How to Scan. This is a byte-for-byte, same-length edit of
+"Find & Apply Coupons..." becomes **"Scan with Claude..."**, and the panel
+behind it points at `panel.py`. This is a byte-for-byte, same-length edit of
 string data only -- Swift stores a literal's length as an instruction immediate,
 so a replacement of identical length cannot shift the binary's layout. The tool
-backs the binary up outside the bundle first, re-signs afterwards so macOS still
-opens the app, and undoes itself:
+backs the binary up outside the bundle, re-signs afterwards so macOS still opens
+the app, and undoes itself:
 
 ```bash
 python3 tools/retire_app_buttons.py --app "..." --restore "<the .bak file>"
 ```
 
-macOS only. The button still exists and still works -- it is now signposted
-rather than removed. Removing it outright needs the app rebuilt from source.
+The same run also **scrubs personal data** from the binary. The original build
+hard-coded one household's town and store branch in its store picker; those are
+matched structurally and replaced with neutral labels, so nobody is handed a
+stranger's neighbourhood. It also stops the app reaching third-party coupon
+blogs.
+
+> **If the button still shows a count** -- "Coupons (3)..." -- that title is
+> built at runtime and cannot be patched. Clear the saved coupon values in the
+> app and it falls back to the label above. macOS only.
 
 ### Make it sound like you
 

@@ -148,6 +148,21 @@ class TestXML(unittest.TestCase):
 class TestBranding(unittest.TestCase):
     """Greetings, headers and imagery must all be overridable, not hard-coded."""
 
+    def test_example_template_matches_defaults(self):
+        """A stale template used to shadow new defaults; keep them in lockstep."""
+        import json as _json
+        from dealcrawler import branding
+        with open(branding.EXAMPLE_FILE, encoding="utf-8") as fh:
+            example = _json.load(fh)
+        self.assertEqual(set(branding.DEFAULTS),
+                         {k for k in example if not k.startswith("_")})
+
+    def test_example_template_is_not_an_override_layer(self):
+        from dealcrawler import branding
+        self.assertNotIn(branding.EXAMPLE_FILE, str(branding.load))
+        # A key only in the template must not reach load().
+        self.assertEqual(set(branding.load()) - set(branding.DEFAULTS), set())
+
     def test_every_default_is_overridable(self):
         from dealcrawler import branding
         brand = branding.load()
@@ -214,7 +229,7 @@ class TestScanDirections(unittest.TestCase):
     def test_panel_renders_the_scan_dialog(self):
         import panel
         html_out = panel.page()
-        for needle in ('id="scan"', 'id="scandlg"', "Your stores"):
+        for needle in ('id="scanwith"', 'id="scandlg"', "Your stores"):
             self.assertIn(needle, html_out)
 
 
@@ -438,6 +453,103 @@ class TestThemeLibrary(unittest.TestCase):
         import re as _re
         src = _re.search(r'id="banner" src="/themes/([^"]+)"', panel.page()).group(1)
         self.assertTrue(src.endswith((".jpg", ".png", ".jpeg")), src)
+
+
+class TestScanWizard(unittest.TestCase):
+    """Scan with Claude: pick a store, wait for the scan, then offer import."""
+
+    def setUp(self):
+        import panel
+        self.panel = panel
+        self.html = panel.page()
+
+    def test_every_step_is_present(self):
+        for needle in ('id="scanwiz"', 'id="w-pick"', 'id="w-wait"',
+                       'id="w-done"', 'id="w-after"'):
+            self.assertIn(needle, self.html)
+
+    def test_a_picker_exists_for_each_store(self):
+        keys = {s["key"] for s in self.panel.scan_help()}
+        for key in keys:
+            self.assertIn(f'data-store="{key}"', self.html)
+
+    def test_import_and_later_are_both_offered(self):
+        self.assertIn('id="w-import"', self.html)
+        self.assertIn('id="w-later"', self.html)
+
+    def test_later_path_is_shown(self):
+        """Declining import must still say where the file is."""
+        self.assertIn('id="w-after-path"', self.html)
+        from dealcrawler import branding
+        self.assertIn("Import Sales XML", branding.load()["scan_later_body"])
+
+    def test_no_html_entities_leak_into_javascript(self):
+        """Strings assigned to textContent must be JS-encoded, not HTML-escaped,
+        or an apostrophe renders as &#x27; in the UI."""
+        script = self.html.split("<script>")[-1]
+        # The esc() helper legitimately contains an entity map; ignore that line.
+        body = "\n".join(line for line in script.splitlines()
+                          if "&lt;" not in line and "&gt;" not in line)
+        self.assertNotIn("&#x27;", body)
+        self.assertNotIn("&#39;", body)
+
+    def test_no_dead_button_handlers(self):
+        """Every $("#id") the script wires up must exist in the markup."""
+        import re as _re
+        wired = set(_re.findall(r'\$\("#([a-zA-Z0-9_-]+)"\)\.onclick', self.html))
+        for ident in wired:
+            self.assertIn(f'id="{ident}"', self.html, f'#{ident} has no element')
+
+    def test_build_for_writes_xml_from_a_scan(self):
+        import os as _os
+        import shutil as _shutil
+        from dealcrawler import stores
+        root = _os.path.dirname(_os.path.abspath(__file__))
+        store = stores.get("shoprite", self.panel.load_config())
+        sample = _os.path.join(root, "examples", "sample-scan.txt")
+        created = not _os.path.exists(store.harvest_path)
+        _shutil.copyfile(sample, store.harvest_path)
+        try:
+            result = self.panel.build_for(store)
+            self.assertTrue(result["found"])
+            self.assertGreater(result["count"], 0)
+            self.assertTrue(result["xml"].endswith(".xml"))
+        finally:
+            if created:
+                _os.remove(store.harvest_path)
+
+
+class TestExtensionNotice(unittest.TestCase):
+    """Scanning depends on the Claude for Chrome extension, so the panel has to
+    say so and link to it."""
+
+    def setUp(self):
+        import panel
+        self.html = panel.page()
+
+    def test_notice_and_install_link_are_present(self):
+        from dealcrawler import branding
+        brand = branding.load()
+        self.assertIn('id="extbar"', self.html)
+        self.assertIn(brand["extension_url"], self.html)
+
+    def test_install_url_uses_the_real_extension_id(self):
+        from dealcrawler import branding
+        brand = branding.load()
+        self.assertIn(brand["extension_id"], brand["extension_url"])
+
+    def test_notice_is_dismissible(self):
+        self.assertIn('id="ext-have"', self.html)
+        self.assertIn("wss.hasExtension", self.html)
+
+    def test_wrong_browser_gets_its_own_message(self):
+        from dealcrawler import branding
+        self.assertIn("CHROMIUM", self.html)
+        self.assertIn(branding.load()["extension_wrong_browser"][:30], self.html)
+
+    def test_localstorage_access_is_guarded(self):
+        """Private windows and blocked site data make localStorage throw."""
+        self.assertIn("try {", self.html.split("function stored")[1][:200])
 
 
 class TestListMessage(unittest.TestCase):

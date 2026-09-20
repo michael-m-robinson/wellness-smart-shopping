@@ -16,6 +16,8 @@ import html
 import json
 import mimetypes
 import os
+import plistlib
+import subprocess
 import sys
 import threading
 import webbrowser
@@ -103,6 +105,68 @@ def run_refresh() -> dict:
             "when": datetime.datetime.now().strftime("%a %d %b, %H:%M")}
 
 
+def find_app() -> str:
+    """Locate the desktop app so the panel can hand the file over to it."""
+    cfg = load_config()
+    configured = cfg.get("app_path")
+    if configured and os.path.isdir(configured):
+        return configured
+    roots = [os.path.dirname(HERE), "/Applications",
+             os.path.expanduser("~/Applications")]
+    for root in roots:
+        if not os.path.isdir(root):
+            continue
+        try:
+            entries = os.listdir(root)
+        except OSError:
+            continue
+        for entry in entries:
+            if not entry.endswith(".app"):
+                continue
+            plist = os.path.join(root, entry, "Contents", "Info.plist")
+            if not os.path.isfile(plist):
+                continue
+            try:
+                with open(plist, "rb") as fh:
+                    info = plistlib.load(fh)
+            except Exception:
+                continue
+            ident = str(info.get("CFBundleIdentifier", "")).lower()
+            if "smartshopping" in ident or "shoppinglist" in ident:
+                return os.path.join(root, entry)
+    return ""
+
+
+def build_for(store) -> dict:
+    """Parse a store's scan and write its XML. Returns what was found."""
+    cfg = load_config()
+    per_weight = cfg.get("per_weight", "convert")
+    use_twins = cfg.get("snack_twins", True)
+
+    if not store.scanned:
+        return {"found": False}
+    try:
+        offers = harvest.parse_file(store.harvest_path, store.name, per_weight)
+    except (OSError, ValueError) as exc:
+        return {"found": True, "error": str(exc), "count": 0, "xml": ""}
+
+    offers = offers_mod.dedupe(offers)
+    if use_twins:
+        offers = offers_mod.dedupe(offers_mod.mirror_twins(offers))
+
+    xml_path = ""
+    if offers:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        xml = xmlout.render(store.name, offers)
+        if not xmlout.validate(xml):
+            today = datetime.date.today()
+            xml_path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
+            with open(xml_path, "w", encoding="utf-8") as fh:
+                fh.write(xml)
+    return {"found": True, "count": len(offers), "xml": xml_path,
+            "mtime": os.path.getmtime(store.harvest_path)}
+
+
 def scan_help() -> list:
     """Per-store scanning directions, built from the configured stores."""
     out = []
@@ -125,6 +189,9 @@ def page() -> str:
     brand = branding.load()
     hour = datetime.datetime.now().hour
     g = lambda k: html.escape(str(brand.get(k, "")))
+    # For values embedded in JavaScript: JSON-encode (quotes included) rather
+    # than HTML-escape, which would leak entities into textContent.
+    j = lambda k: json.dumps(str(brand.get(k, "")))
     theme = brand.get("theme") or "50s-1"
     theme_files = {t["name"]: t["file"] for t in branding.themes()}
     banner_file = theme_files.get(theme) or next(iter(theme_files.values()), "")
@@ -137,6 +204,11 @@ def page() -> str:
     msg_opts = "".join(
         f'<option value="{html.escape(str(m))}">{html.escape(str(m))}</option>'
         for m in presets)
+    pick_html = "".join(
+        f'<button class="picker" data-store="{html.escape(st["key"])}">'
+        f'<b>{html.escape(st["store"])}</b>'
+        f'<span>{"scanned" if st["scanned"] else "not scanned yet"}</span>'
+        f'</button>' for st in scan_help())
     meals_all = ["Breakfast", "Lunch", "Dinner", "Snacks"]
     meals_html = "".join(
         f'<label class="chk"><input type="checkbox" value="{m}"'
@@ -246,6 +318,19 @@ def page() -> str:
   dialog .inner{{padding:22px 24px}}
   dialog ol{{padding-left:20px;margin:0 0 14px}}
   dialog li{{margin-bottom:8px}}
+  .btnlink{{display:inline-block;font:inherit;font-weight:600;padding:11px 17px;
+    border-radius:10px;background:var(--accent);color:var(--accent-ink);
+    text-decoration:none}}
+  .btnlink:hover{{opacity:.92}}
+  .pickers{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}}
+  .picker{{text-align:left;padding:13px 15px}}
+  .picker b{{display:block;font-size:1rem}}
+  .picker span{{display:block;font-size:.78rem;color:var(--muted);font-weight:500;
+    text-transform:uppercase;letter-spacing:.04em;margin-top:2px}}
+  .promptbox{{display:flex;gap:8px;align-items:flex-start;background:var(--bg);
+    border-radius:10px;padding:10px 12px;margin-top:4px}}
+  .promptbox code{{flex:1;font-size:.83rem;word-break:break-word;line-height:1.45}}
+  @media (max-width:560px){{ .pickers{{grid-template-columns:1fr}} }}
   .listmsg{{font-size:1.06rem;font-weight:600;margin:0 0 16px;
     color:var(--accent);letter-spacing:.01em}}
   @media (prefers-color-scheme: dark) {{
@@ -296,9 +381,19 @@ def page() -> str:
   </div>
 </header>
 
+<div class="card warn" id="extbar" hidden>
+  <div class="store-line"><h2 id="ext-title">{g('extension_title')}</h2></div>
+  <p class="muted" id="ext-body">{g('extension_body')}</p>
+  <div class="row" style="margin:12px 0 0">
+    <a class="btnlink" id="ext-get" href="{g('extension_url')}" target="_blank"
+       rel="noopener">{g('extension_install')}</a>
+    <button id="ext-have">{g('extension_have')}</button>
+  </div>
+</div>
+
 <div class="row">
-  <button class="primary" id="refresh">{g('refresh_button')}</button>
-  <button id="scan">{g('scan_button')}</button>
+  <button class="primary" id="scanwith">{g('scan_button')}</button>
+  <button id="refresh">{g('refresh_button')}</button>
   <button id="howto">{g('import_button')}</button>
 </div>
 
@@ -438,6 +533,53 @@ def page() -> str:
   </div>
 </div></dialog>
 
+<dialog id="scanwiz"><div class="inner">
+  <section id="w-pick">
+    <h2>{g('scan_pick_title')}</h2>
+    <p class="muted">{g('scan_pick_intro')}</p>
+    <div class="pickers">{pick_html}</div>
+    <div class="row" style="margin:16px 0 0">
+      <button id="w-pick-close">Close</button>
+      <button id="w-help">{g('scan_help_button')}</button>
+    </div>
+  </section>
+
+  <section id="w-wait" hidden>
+    <h2 id="w-wait-title"></h2>
+    <p class="muted">{g('scan_wait_body')}</p>
+    <div id="w-links"></div>
+    <label style="margin-top:14px">Give Claude this instruction</label>
+    <div class="promptbox"><code id="w-prompt"></code>
+      <button id="w-copy" style="padding:6px 12px;font-size:.82rem">Copy</button></div>
+    <p class="muted" id="w-ext" hidden style="margin:12px 0 0">
+      Need the extension?
+      <a href="{g('extension_url')}" target="_blank" rel="noopener">Install Claude for Chrome</a>
+    </p>
+    <p class="muted" id="w-status" style="margin:16px 0 0">
+      <span class="spin"></span>{g('scan_waiting')}</p>
+    <div class="row" style="margin:14px 0 0"><button id="w-cancel">Cancel</button></div>
+  </section>
+
+  <section id="w-done" hidden>
+    <h2 id="w-done-title"></h2>
+    <p id="w-done-body" class="muted"></p>
+    <div class="row" style="margin:16px 0 0">
+      <button class="primary" id="w-import">{g('scan_import_now')}</button>
+      <button id="w-later">{g('scan_import_later')}</button>
+    </div>
+  </section>
+
+  <section id="w-after" hidden>
+    <h2 id="w-after-title"></h2>
+    <p id="w-after-body" class="muted"></p>
+    <p class="files" id="w-after-path"></p>
+    <div class="row" style="margin:16px 0 0">
+      <button class="primary" id="w-after-close">Done</button>
+      <button id="w-again">Scan another store</button>
+    </div>
+  </section>
+</div></dialog>
+
 <dialog id="scandlg"><div class="inner">
   <h2>{g('scan_title')}</h2>
   <p class="muted">{g('scan_intro')}</p>
@@ -508,9 +650,9 @@ function schedulePreview() {{
       const d = await postProfile(true);
       paint(d.target, "#v-");
       $("#v-note").textContent = d.target.personalised
-        ? "{g('targets_note')}"
+        ? {j('targets_note')}
         : (d.complete
-           ? "{g('targets_note_partial')}"
+           ? {j('targets_note_partial')}
            : "Add your height and weight for a target sized to you.");
     }} catch (e) {{}}
   }}, 260);
@@ -529,7 +671,145 @@ $("#saveprofile").onclick = async () => {{
 
 if ({first_run_js}) profDlg.showModal();
 
-$("#scan").onclick = () => $("#scandlg").showModal();
+// ---- Claude for Chrome notice --------------------------------------------
+// A page cannot reliably detect an installed extension: the resources this one
+// exposes are content-hashed and change with every release, so probing for them
+// would report "missing" after any update. Only the browser is certain, so the
+// notice informs and can be dismissed rather than claiming anything false.
+const CHROMIUM = (() => {{
+  try {{
+    const brands = (navigator.userAgentData && navigator.userAgentData.brands) || [];
+    if (brands.some(b => /Chromium|Google Chrome/i.test(b.brand))) return true;
+  }} catch (e) {{}}
+  const ua = navigator.userAgent || "";
+  return /Chrome|Chromium|CriOS/i.test(ua) && !/Firefox|FxiOS/i.test(ua);
+}})();
+
+function stored(key) {{
+  try {{ return localStorage.getItem(key); }} catch (e) {{ return null; }}
+}}
+function store(key, value) {{
+  try {{ localStorage.setItem(key, value); }} catch (e) {{}}
+}}
+
+(function extensionNotice() {{
+  const bar = $("#extbar");
+  if (!bar) return;
+  if (!CHROMIUM) {{
+    // Certain: this browser cannot run it at all.
+    $("#ext-body").textContent = {j('extension_wrong_browser')};
+    $("#ext-have").hidden = true;
+    bar.hidden = false;
+    $("#w-ext").hidden = false;
+    return;
+  }}
+  if (stored("wss.hasExtension") === "yes") return;
+  bar.hidden = false;
+  $("#w-ext").hidden = false;
+}})();
+
+$("#ext-have").onclick = () => {{
+  store("wss.hasExtension", "yes");
+  $("#extbar").hidden = true;
+  $("#w-ext").hidden = true;
+}};
+
+// ---- Scan with Claude -----------------------------------------------------
+const wiz = $("#scanwiz");
+let wizState = {{store: null, baseline: 0, xml: "", timer: null}};
+
+function wizStep(id) {{
+  ["w-pick", "w-wait", "w-done", "w-after"].forEach(
+    s => $("#" + s).hidden = (s !== id));
+}}
+
+function wizStop() {{
+  if (wizState.timer) {{ clearInterval(wizState.timer); wizState.timer = null; }}
+}}
+
+async function wizPost(action, body) {{
+  const r = await fetch("/api/scan/" + action, {{
+    method: "POST", headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify(body)}});
+  return r.json();
+}}
+
+$("#scanwith").onclick = () => {{ wizStop(); wizStep("w-pick"); wiz.showModal(); }};
+$("#w-pick-close").onclick = () => {{ wizStop(); wiz.close(); }};
+$("#w-cancel").onclick = () => {{ wizStop(); wizStep("w-pick"); }};
+$("#w-again").onclick = () => {{ wizStop(); wizStep("w-pick"); }};
+$("#w-after-close").onclick = () => {{ wizStop(); wiz.close(); location.reload(); }};
+$("#w-help").onclick = () => {{ wiz.close(); $("#scandlg").showModal(); }};
+
+document.querySelectorAll(".picker").forEach(el => {{
+  el.onclick = async () => {{
+    const key = el.dataset.store;
+    const d = await wizPost("start", {{store: key}});
+    wizState = {{store: key, baseline: d.baseline, xml: "", timer: null}};
+    $("#w-wait-title").textContent = {j('scan_wait_title')}.replace("{{store}}", d.name);
+    $("#w-prompt").textContent = d.prompt;
+    $("#w-links").innerHTML = (d.urls || []).map(
+      u => '<p><a href="' + esc(u.url) + '" target="_blank" rel="noopener">' +
+           esc(u.label) + '</a></p>').join("");
+    $("#w-status").innerHTML = '<span class="spin"></span>' + esc({j('scan_waiting')});
+    wizStep("w-wait");
+    wizState.timer = setInterval(wizPoll, 2500);
+  }};
+}});
+
+$("#w-copy").onclick = async () => {{
+  try {{
+    await navigator.clipboard.writeText($("#w-prompt").textContent);
+    $("#w-copy").textContent = "Copied";
+    setTimeout(() => $("#w-copy").textContent = "Copy", 1600);
+  }} catch (e) {{ $("#w-copy").textContent = "Select and copy"; }}
+}};
+
+async function wizPoll() {{
+  let d;
+  try {{ d = await wizPost("check", {{store: wizState.store, baseline: wizState.baseline}}); }}
+  catch (e) {{ return; }}
+  if (!d.ready) return;
+  wizStop();
+  if (d.error) {{
+    $("#w-status").textContent = "Could not read the scan: " + esc(d.error);
+    return;
+  }}
+  wizState.xml = d.xml || "";
+  if (!d.count) {{
+    $("#w-done-title").textContent =
+      {j('scan_none_title')}.replace("{{store}}", d.name).replace("{{count}}", "0");
+    $("#w-done-body").textContent = {j('scan_none_body')};
+    $("#w-import").hidden = true;
+    $("#w-later").textContent = "Close";
+  }} else {{
+    $("#w-done-title").textContent = {j('scan_done_title')}
+      .replace("{{store}}", d.name).replace("{{count}}", d.count);
+    $("#w-done-body").textContent = {j('scan_done_body')};
+    $("#w-import").hidden = false;
+    $("#w-later").textContent = {j('scan_import_later')};
+  }}
+  wizStep("w-done");
+}}
+
+$("#w-import").onclick = async () => {{
+  const d = await wizPost("import", {{store: wizState.store, xml: wizState.xml}});
+  $("#w-after-title").textContent = d.opened ? "Over to the app" : "Almost there";
+  $("#w-after-body").textContent = d.opened
+    ? {j('scan_imported_body')}
+    : "Could not open the app automatically. The file is here (path copied):";
+  $("#w-after-path").textContent = d.xml || wizState.xml;
+  wizStep("w-after");
+}};
+
+$("#w-later").onclick = () => {{
+  if (!wizState.xml) {{ wizStop(); wiz.close(); location.reload(); return; }}
+  $("#w-after-title").textContent = {j('scan_later_title')};
+  $("#w-after-body").textContent = {j('scan_later_body')};
+  $("#w-after-path").textContent = wizState.xml;
+  wizStep("w-after");
+}};
+
 $("#scanclose").onclick = () => $("#scandlg").close();
 $("#howto").onclick = () => $("#dlg").showModal();
 $("#close").onclick = () => $("#dlg").close();
@@ -537,7 +817,7 @@ $("#close").onclick = () => $("#dlg").close();
 $("#refresh").onclick = async () => {{
   const b = $("#refresh");
   b.disabled = true;
-  b.innerHTML = '<span class="spin"></span>{g('refresh_working')}';
+  b.innerHTML = '<span class="spin"></span>' + esc({j('refresh_working')});
   try {{
     const r = await fetch("/api/refresh", {{method: "POST"}});
     render(await r.json());
@@ -545,7 +825,7 @@ $("#refresh").onclick = async () => {{
     $("#results").innerHTML =
       '<div class="card warn">Could not refresh: ' + esc(e.message) + '</div>';
   }} finally {{
-    b.disabled = false; b.textContent = "{g('refresh_button')}";
+    b.disabled = false; b.textContent = {j('refresh_button')};
   }}
 }};
 
@@ -686,6 +966,82 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
             finally:
                 _state["running"] = False
+
+        if path.startswith("/api/scan/"):
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except ValueError:
+                return self._send(400, json.dumps({"error": "bad json"}),
+                                  "application/json")
+            cfg = load_config()
+            store = stores_mod.get(str(body.get("store", "")), cfg)
+            if store is None:
+                return self._send(404, json.dumps({"error": "unknown store"}),
+                                  "application/json")
+            brand = branding.load()
+            action = path[len("/api/scan/"):]
+
+            if action == "start":
+                # Remember what was on disk, so a stale scan is not mistaken
+                # for the one the user is about to run.
+                baseline = (os.path.getmtime(store.harvest_path)
+                            if store.scanned else 0)
+                prompt = str(brand.get("scan_prompt", "")).format(
+                    store=store.name, path=store.harvest_path)
+                return self._send(200, json.dumps({
+                    "store": store.key, "name": store.name, "urls": store.urls,
+                    "path": store.harvest_path, "prompt": prompt,
+                    "baseline": baseline,
+                }), "application/json")
+
+            if action == "check":
+                baseline = float(body.get("baseline") or 0)
+                if not store.scanned:
+                    return self._send(200, json.dumps({"ready": False}),
+                                      "application/json")
+                mtime = os.path.getmtime(store.harvest_path)
+                # Only act on a scan written after the user started this run.
+                if mtime <= baseline:
+                    return self._send(200, json.dumps({"ready": False}),
+                                      "application/json")
+                result = build_for(store)
+                return self._send(200, json.dumps({
+                    "ready": True, "name": store.name,
+                    "count": result.get("count", 0),
+                    "xml": result.get("xml", ""),
+                    "error": result.get("error", ""),
+                }), "application/json")
+
+            if action == "import":
+                xml = str(body.get("xml") or "")
+                # Never hand an arbitrary path to `open`.
+                if (not xml or not os.path.isfile(xml)
+                        or not os.path.abspath(xml).startswith(OUT_DIR)):
+                    return self._send(400, json.dumps(
+                        {"error": "no such sales file"}), "application/json")
+                app = find_app()
+                opened = False
+                try:
+                    if app:
+                        subprocess.run(["open", "-a", app], check=False,
+                                       capture_output=True, timeout=15)
+                    subprocess.run(["open", "-R", xml], check=False,
+                                   capture_output=True, timeout=15)
+                    opened = True
+                except (OSError, subprocess.SubprocessError):
+                    opened = False
+                try:
+                    subprocess.run(["pbcopy"], input=xml.encode(), check=False,
+                                   timeout=5)
+                except (OSError, subprocess.SubprocessError):
+                    pass
+                return self._send(200, json.dumps({
+                    "opened": opened, "app": os.path.basename(app) if app else "",
+                    "xml": xml,
+                }), "application/json")
+
+            return self._send(404, json.dumps({"error": "unknown action"}),
+                              "application/json")
 
         if path == "/api/profile":
             try:
