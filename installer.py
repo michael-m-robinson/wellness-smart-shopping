@@ -70,8 +70,13 @@ def ask(question, default=True):
 
 
 def run(cmd, **kw):
+    # PYTHONDONTWRITEBYTECODE: --check promises to change nothing, and stray
+    # __pycache__ directories are still a change.
+    env = dict(os.environ, PYTHONDONTWRITEBYTECODE="1")
+    env.update(kw.pop("env", {}))
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=90, **kw)
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=90,
+                              env=env, **kw)
     except (OSError, subprocess.SubprocessError):
         return None
 

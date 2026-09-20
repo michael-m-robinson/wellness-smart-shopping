@@ -525,22 +525,30 @@ class TestScanWizard(unittest.TestCase):
             self.assertIn(f'id="{ident}"', self.html, f'#{ident} has no element')
 
     def test_build_for_writes_xml_from_a_scan(self):
+        """Writes to a temp dir: a test must not litter the project tree, or
+        `installer.py --check` stops being side-effect free."""
         import os as _os
         import shutil as _shutil
+        import tempfile as _tempfile
         from dealcrawler import stores
         root = _os.path.dirname(_os.path.abspath(__file__))
         store = stores.get("shoprite", self.panel.load_config())
         sample = _os.path.join(root, "examples", "sample-scan.txt")
         created = not _os.path.exists(store.harvest_path)
         _shutil.copyfile(sample, store.harvest_path)
-        try:
-            result = self.panel.build_for(store)
-            self.assertTrue(result["found"])
-            self.assertGreater(result["count"], 0)
-            self.assertTrue(result["xml"].endswith(".xml"))
-        finally:
-            if created:
-                _os.remove(store.harvest_path)
+        original_out = self.panel.OUT_DIR
+        with _tempfile.TemporaryDirectory() as tmp:
+            self.panel.OUT_DIR = tmp
+            try:
+                result = self.panel.build_for(store)
+                self.assertTrue(result["found"])
+                self.assertGreater(result["count"], 0)
+                self.assertTrue(result["xml"].endswith(".xml"))
+                self.assertTrue(result["xml"].startswith(tmp))
+            finally:
+                self.panel.OUT_DIR = original_out
+                if created:
+                    _os.remove(store.harvest_path)
 
 
 class TestExtensionNotice(unittest.TestCase):
@@ -714,16 +722,21 @@ class TestInstaller(unittest.TestCase):
     def test_check_mode_makes_no_changes(self):
         """--check must never write; it is the 'look first' mode."""
         import subprocess as sp
-        before = {f: os.path.getmtime(os.path.join(self.root, f))
-                  for f in os.listdir(self.root)
-                  if os.path.isfile(os.path.join(self.root, f))}
+
+        def snapshot():
+            seen = set()
+            for dirpath, dirnames, filenames in os.walk(self.root):
+                dirnames[:] = [d for d in dirnames
+                               if d not in {".git", "__pycache__", "build"}]
+                for name in dirnames + filenames:
+                    seen.add(os.path.relpath(os.path.join(dirpath, name), self.root))
+            return seen
+
+        before = snapshot()
         env = dict(os.environ, WSS_SKIP_TESTS="1")
         sp.run([sys.executable, "installer.py", "--check"],
                cwd=self.root, capture_output=True, timeout=120, env=env)
-        after = {f: os.path.getmtime(os.path.join(self.root, f))
-                 for f in os.listdir(self.root)
-                 if os.path.isfile(os.path.join(self.root, f))}
-        self.assertEqual(before, after)
+        self.assertEqual(snapshot() - before, set(), "--check created something")
 
     def test_requirements_txt_pins_nothing(self):
         path = os.path.join(self.root, "requirements", "requirements.txt")
