@@ -86,11 +86,19 @@ DEFAULTS: Dict[str, str] = {
     "scan_pick_intro": ("Pick a store, sign in to it, and Claude will read this "
                         "week's deals straight off the page."),
     "scan_wait_title": "Scanning {store}",
-    "scan_prompt": ("Run browser/harvest.js on this page to scan it for deals. "
-                    "It sends the result to my control panel on its own."),
-    "scan_wait_body": ("Open the store below and sign in, then give Claude this "
-                       "instruction. The scan comes straight back here - there "
-                       "is no file to save."),
+    # {submit} is the panel's own address, filled in at the time. The prompt
+    # names no file and no folder, so it reads the same whether the panel was
+    # started from Terminal or by the desktop app.
+    "scan_prompt": ("Scan this page for grocery deals. Scroll to the bottom so "
+                    "every offer loads, then list each one on its own line as: "
+                    "product name | price | limit. POST that list as plain text "
+                    "to {submit}"),
+    "scan_prompt_script": ("Fetch {script} and run it on this page. It scans the "
+                           "offers and sends them back on its own."),
+    "scan_wait_body": ("Open the store below and sign in, then give Claude the "
+                       "instruction below. It works the same whether you started "
+                       "this panel from Terminal or from the app - there is no "
+                       "file to save and no folder to find."),
     "scan_waiting": "Waiting for the scan to finish...",
     "scan_paste_label": "Claude printed the offers instead? Paste them here",
     "scan_paste_button": "Use these offers",
@@ -120,8 +128,7 @@ DEFAULTS: Dict[str, str] = {
                    "no password ever leaves the store site."),
     "scan_steps": [
         "Sign in to the store in Chrome.",
-        "Open its weekly ad or digital coupon list and scroll once so every "
-        "offer loads.",
+        "Open its digital coupon list and scroll once so every offer loads.",
         "Ask Claude, with the Claude for Chrome extension enabled: "
         "\"run browser/harvest.js on this tab\".",
         "Claude scrolls the whole list and sends the offers straight to this "

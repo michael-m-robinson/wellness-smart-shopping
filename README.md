@@ -81,14 +81,26 @@ cut, because the numbers are on their side.
 
 ## What you need
 
+**Pick one route — you do not need both:**
+
+| Route | What you run | Good for |
+| --- | --- | --- |
+| **Desktop app** | Drag it in from the disk image, press **Scan with Claude** | Meal plans, recipes and PDFs as well as deals |
+| **Terminal** | `python3 panel.py` (or `python3 crawl.py`) | The panel and the sales file on their own |
+
+Both open the same control panel, hand Claude the same instruction and produce
+the same file. The instruction names no folder and no file, so it reads exactly
+the same whichever one started the panel.
+
+Then, either way:
+
 | Requirement | Why |
 | --- | --- |
-| **A Claude subscription** | Required. Every store is read by Claude from your own browser. |
+| **A Claude subscription** | Required for scanning. Claude reads the store page from your own browser. |
 | **[The Claude for Chrome extension](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn)** | Required for scanning. The panel links you to it if it is missing. |
-| **Python 3.9+** | The crawler itself. Standard library only — nothing to install. |
-| **Chrome, signed in to your stores** | Digital coupons and member pricing only exist inside your own logged-in session. |
+| **Python 3.9+** | The control panel and crawler. macOS ships it; standard library only, nothing to install. |
+| **Chrome, signed in to your stores** | Digital coupons only exist inside your own logged-in session. Edge, Brave and Arc count too. |
 | No network access of its own | This program never contacts a store. A test enforces it. |
-| The Smart Shopping List desktop app | Optional. The XML is plain text and can be read by anything. |
 
 > **Please sign in to your stores before crawling.** Most grocers serve deals
 > only to a signed-in session. If you are signed out, the crawler will stop and

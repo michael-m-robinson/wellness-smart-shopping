@@ -43,6 +43,9 @@ _lock = threading.Lock()
 # happens until the first heartbeat arrives, so a panel started by the desktop
 # app before any browser opens is left alone.
 _alive = {"last_seen": 0.0, "seen": False, "closing": False}
+# Filled in once the server binds, so the prompt carries the real port rather
+# than an assumed one.
+_base = {"url": "http://127.0.0.1:8765"}
 IDLE_GRACE = 12.0      # no heartbeat for this long -> the window is gone
 CLOSING_GRACE = 4.0    # after a close beacon, this long for a reload to return
 
@@ -747,7 +750,7 @@ def page() -> str:
   <ol>{steps_html}</ol>
   <div class="card warn" style="margin:0 0 16px"><strong>Signed out?</strong>
     Grocers only show coupons to a signed-in session. Sign in to the store in
-    Chrome, open its weekly ad, then ask Claude (with the Claude for Chrome
+    Chrome, open its coupon list, then ask Claude (with the Claude for Chrome
     extension) to run <code>browser/harvest.js</code> on that tab.</div>
   <p class="muted">{g('import_note')}</p>
   <div class="row" style="margin:16px 0 0"><button class="primary" id="close">Close</button></div>
@@ -1185,6 +1188,14 @@ class Handler(BaseHTTPRequestHandler):
                 with open(full, "rb") as fh:
                     return self._send(200, fh.read(), ctype)
             return self._send(404, b"not found", "text/plain")
+        if path in ("/harvest.js", "/browser/harvest.js"):
+            script = paths.source("browser", "harvest.js")
+            if os.path.isfile(script):
+                with open(script, "rb") as fh:
+                    return self._send(200, fh.read(),
+                                      "application/javascript; charset=utf-8")
+            return self._send(404, b"not found", "text/plain")
+
         if path == "/api/ping":
             _touch()
             return self._send(200, b"ok", "text/plain")
@@ -1281,11 +1292,17 @@ class Handler(BaseHTTPRequestHandler):
                 # for the one the user is about to run.
                 baseline = (os.path.getmtime(store.harvest_path)
                             if store.scanned else 0)
+                submit = f"{_base['url']}/api/scan/submit?store={store.key}"
+                script = f"{_base['url']}/harvest.js"
                 prompt = str(brand.get("scan_prompt", "")).format(
-                    store=store.name, path=store.harvest_path)
+                    store=store.name, path=store.harvest_path,
+                    submit=submit, script=script)
+                prompt_script = str(brand.get("scan_prompt_script", "")).format(
+                    store=store.name, submit=submit, script=script)
                 return self._send(200, json.dumps({
                     "store": store.key, "name": store.name, "urls": store.urls,
                     "path": store.harvest_path, "prompt": prompt,
+                    "prompt_script": prompt_script, "script": script,
                     "baseline": baseline,
                 }), "application/json")
 
@@ -1385,6 +1402,7 @@ def main(argv=None):
     args = ap.parse_args(argv)
 
     url = f"http://127.0.0.1:{args.port}"
+    _base["url"] = url
     # Bind to loopback only: this panel is for the person at this machine.
     try:
         server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)

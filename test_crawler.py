@@ -934,6 +934,43 @@ class TestScanDelivery(unittest.TestCase):
             if created and os.path.exists(store.harvest_path):
                 os.remove(store.harvest_path)
 
+    def test_prompt_works_from_either_route(self):
+        """Terminal or desktop app, the instruction must read the same: it can
+        name no folder, because the two installs keep files in different
+        places."""
+        prompt = self.brand["scan_prompt"]
+        for local in ("harvest/", ".txt", "browser/", "panel.py", "/Users/"):
+            self.assertNotIn(local, prompt, local)
+        self.assertIn("{submit}", prompt)
+
+    def test_prompt_carries_the_panels_real_address(self):
+        import json as _json
+        from dealcrawler import stores
+        store = stores.get("shoprite", self.panel.load_config())
+        self.panel._base["url"] = "http://127.0.0.1:9999"
+        submit = f"{self.panel._base['url']}/api/scan/submit?store={store.key}"
+        filled = self.brand["scan_prompt"].format(
+            store=store.name, path=store.harvest_path, submit=submit,
+            script=f"{self.panel._base['url']}/harvest.js")
+        self.assertIn("9999", filled)
+        self.panel._base["url"] = "http://127.0.0.1:8765"
+
+    def test_script_is_served_for_those_who_prefer_it(self):
+        source = open(self.panel.__file__, encoding="utf-8").read()
+        self.assertIn('"/harvest.js"', source)
+
+    def test_shoprite_offers_only_the_coupon_list(self):
+        from dealcrawler import stores
+        store = stores.get("shoprite", self.panel.load_config())
+        labels = [u["label"] for u in store.urls]
+        self.assertEqual(labels, ["Open the digital coupon list"])
+
+    def test_no_wording_still_points_at_a_weekly_ad(self):
+        for key in ("scan_steps", "scan_wait_body", "scan_prompt"):
+            value = self.brand[key]
+            text = " ".join(value) if isinstance(value, list) else str(value)
+            self.assertNotIn("weekly ad", text.lower(), key)
+
     def test_paste_box_exists_as_a_fallback(self):
         self.assertIn('id="w-paste"', self.html)
         self.assertIn('id="w-paste-go"', self.html)
