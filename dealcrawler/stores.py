@@ -109,7 +109,6 @@ rather than dropping it."""
 # redeemNotice() in app/main.swift.
 #   level      "action" (do something first) or "info" (good to know)
 #   signed_in  the wording once the Scanner can see you are logged in
-#   login      the bar at the top of the panel while you are logged out
 SHOPRITE_REDEEM = {
     "level": "action",
     "title": "Almost there! Log in to ShopRite to use these coupons",
@@ -123,13 +122,6 @@ SHOPRITE_REDEEM = {
         "body": ("Open ShopRite's Digital Coupons and tap Load to Card on each "
                  "coupon below. A coupon only comes off at the register once "
                  "it's on your account."),
-    },
-    "login": {
-        "title": "Let's get you logged in to ShopRite",
-        "body": ("You must be logged in to ShopRite, because it's the only way "
-                 "you can load coupons to your account. It only takes a moment, "
-                 "and then every coupon on your list is ready to load."),
-        "button": "Log in to ShopRite",
     },
     "link": {"label": "Open my ShopRite coupons",
              "url": "https://www.shoprite.com/sm/planning/rsid/{store_id}/digital-coupon"},
@@ -303,8 +295,7 @@ def _redeem(value, store_id: str) -> dict:
                        "url": str(link["url"]).replace("{store_id}", store_id or "000")}
         if link.get("scanned"):
             out["link"]["scanned"] = True
-    for part, keys in (("signed_in", ("title", "body")),
-                       ("login", ("title", "body", "button"))):
+    for part, keys in (("signed_in", ("title", "body")),):
         sub = value.get(part)
         if isinstance(sub, dict) and sub.get("title"):
             out[part] = {k: str(sub.get(k, "")) for k in keys}

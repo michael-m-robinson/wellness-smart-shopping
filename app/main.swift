@@ -1860,8 +1860,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // Keep an installed Scanner in step with this build.
         if FileManager.default.fileExists(atPath: AppDelegate.scannerFolder.path) { syncScanner() }
         restoreLastOutput()
+        // No deals loaded: say what a scan is worth, and point at the button.
+        if verifiedSaleItemIDs().isEmpty {
+            status.stringValue = AppDelegate.savingsMessage
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { [weak self] in
+                guard let self else { return }
+                self.pulse(self.couponsButton)
+            }
+        }
         NSApp.activate(ignoringOtherApps: true)
     }
+
+    /// The same friendly nudge the control panel shows while no deals are loaded.
+    static let savingsMessage = "You could be saving money this week! Press Scan Deals... to load this week's deals - every one it finds comes straight off your total."
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool { true }
 
@@ -2704,8 +2715,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private func nudgeToScan() {
         let stale = UserDefaults.standard.object(forKey: dealsScannedAtKey) != nil
         let message = stale
-            ? "Your last scan is over a week old. Scan this week's deals first - your PDFs are priced with them."
-            : "Scan this week's deals first - your PDFs are priced with them."
+            ? "Time for a fresh scan! Your deals are over a week old - press Scan Deals... and your PDFs will be priced with this week's savings."
+            : "You could be saving money this week! Press Scan Deals... first - your PDFs are priced with the deals it finds."
         status.stringValue = message
         pulse(couponsButton)
 

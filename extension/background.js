@@ -70,7 +70,7 @@ async function findPanel(preferred) {
       const r = await fetch(`${base}/api/state`, { cache: "no-store" });
       if (r.ok) {
         const state = await r.json();
-        return { base, active: state.active !== false };
+        return { base, active: state.active !== false, deals: state.deals || null };
       }
     } catch (e) { /* not on this port */ }
   }

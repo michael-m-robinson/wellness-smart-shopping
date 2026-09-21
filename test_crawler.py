@@ -638,6 +638,13 @@ class TestDesktopAppSource(unittest.TestCase):
         self.assertIn("NSPopover()", nudge)
         self.assertIn("of: couponsButton", nudge)
 
+    def test_app_says_what_a_scan_is_worth_when_no_deals_are_loaded(self):
+        launch = self.src[self.src.index("func applicationDidFinishLaunching"):]
+        launch = launch[:launch.index("static let savingsMessage")]
+        self.assertIn("if verifiedSaleItemIDs().isEmpty", launch)
+        self.assertIn("pulse(self.couponsButton)", launch)
+        self.assertIn("You could be saving money this week", self.src)
+
     def test_importing_a_sales_file_counts_as_a_scan(self):
         imp = self.src[self.src.index("@objc func importSalesXML"):]
         imp = imp[:imp.index("@objc func clearCoupons")]
@@ -1171,8 +1178,6 @@ class TestRedeemNotices(unittest.TestCase):
         why = "because it's the only way you can load coupons to your account"
         self.assertIn("You must be logged in to ShopRite", shoprite["body"])
         self.assertIn(why, shoprite["body"])
-        self.assertIn(why, shoprite["login"]["body"])
-        self.assertTrue(shoprite["login"]["button"])
         self.assertIn("logged in", shoprite["signed_in"]["title"])
         self.assertIn("rsid/392/", shoprite["link"]["url"])
         # Costco: its own terms -- instant savings, membership, no clipping.
@@ -1196,14 +1201,36 @@ class TestRedeemNotices(unittest.TestCase):
             "level": "action", "title": "Clip first", "body": "In the app."}}}}
         self.assertEqual(stores.get("corner", cfg).redeem["title"], "Clip first")
 
-    def test_login_bar_sits_at_the_top_of_the_page(self):
+    def test_savings_notice_sits_at_the_top_until_a_deal_is_found(self):
         import panel
         html_out = panel.page()
         body = html_out[html_out.index("<body>"):]
-        self.assertLess(body.index('id="loginbar"'), body.index('id="banner"'))
-        self.assertIn('id="loginbar-later"', body)
-        self.assertIn('"login":', html_out)          # ShopRite's copy is on the page
+        self.assertLess(body.index('id="savebar"'), body.index('id="banner"'))
+        self.assertIn("You could be saving money this week", body)
+        self.assertIn('id="savebar-later"', body)
+        self.assertIn('$("#scanwith").click()', html_out)   # it opens the scan
+        self.assertNotIn('id="loginbar"', html_out)  # one general notice, not per store
         self.assertIn(".note[hidden]", html_out)     # hidden must beat display:flex
+
+    def test_deals_on_hand_counts_this_weeks_sales_files(self):
+        import tempfile
+        import panel
+        saved = panel.OUT_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            panel.OUT_DIR = tmp
+            try:
+                self.assertEqual(panel.deals_on_hand()["count"], 0)
+                with open(os.path.join(tmp, "costco-sales-2026-09-21.xml"), "w") as fh:
+                    fh.write('<costcoSales store="Costco"></costcoSales>')   # a quiet week
+                self.assertEqual(panel.deals_on_hand()["count"], 0)
+                with open(os.path.join(tmp, "stews-sales-2026-09-21.xml"), "w") as fh:
+                    fh.write('<s><offer itemId="eggs" savings="1.00"/><offer itemId="oats" savings="2.00"/></s>')
+                self.assertEqual(panel.deals_on_hand(), {"count": 2, "stores": ["stews"]})
+                old = os.path.join(tmp, "stews-sales-2026-09-21.xml")
+                os.utime(old, (0, 0))                                        # last week's
+                self.assertEqual(panel.deals_on_hand()["count"], 0)
+            finally:
+                panel.OUT_DIR = saved
 
     def test_bridge_tag_cannot_be_overwritten_by_a_result(self):
         """A result field named "source" once replaced the bridge's tag, and

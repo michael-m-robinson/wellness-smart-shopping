@@ -79,6 +79,38 @@ def _page_closed():
 _ACTIVE_FILE = "panel_state.json"
 
 
+DEALS_FRESH_DAYS = 7    # a sales file older than this is last week's deals
+
+
+def deals_on_hand() -> dict:
+    """Sales files written this week that carry at least one deal.
+
+    Drives the "you could be saving money" notice at the top of the page:
+    it shows until a scan has found something for the list.
+    """
+    cutoff = time.time() - DEALS_FRESH_DAYS * 86400
+    stores, total = set(), 0
+    try:
+        names = os.listdir(OUT_DIR)
+    except OSError:
+        names = []
+    for name in names:
+        if "-sales-" not in name or not name.endswith(".xml"):
+            continue
+        path = os.path.join(OUT_DIR, name)
+        try:
+            if os.path.getmtime(path) < cutoff:
+                continue
+            with open(path, encoding="utf-8") as fh:
+                count = fh.read().count("<offer ")
+        except OSError:
+            continue
+        if count:
+            stores.add(name.split("-sales-")[0])
+            total += count
+    return {"count": total, "stores": sorted(stores)}
+
+
 def scanning_active() -> bool:
     """True when the panel is accepting scans."""
     try:
@@ -386,13 +418,12 @@ def page() -> str:
     msg_opts = "".join(
         f'<option value="{html.escape(str(m))}">{html.escape(str(m))}</option>'
         for m in presets)
-    # Stores whose deals need you signed in (ShopRite coupons): the panel asks
-    # the Scanner whether you are, and shows the login bar if not.
+    # Stores whose coupons need you logged in (ShopRite): the panel asks the
+    # Scanner whether you are, so a scan result can say the right thing.
     account_json = json.dumps([
-        {"key": st.key, "site": st.adapter or st.key, "name": st.name,
-         "login": st.redeem["login"],
-         "url": (st.redeem.get("link") or {}).get("url", "")}
-        for st in stores_mod.load(load_config()) if st.redeem.get("login")])
+        {"key": st.key, "site": st.adapter or st.key, "name": st.name}
+        for st in stores_mod.load(load_config()) if st.redeem.get("signed_in")])
+    deals_json = json.dumps(deals_on_hand())
     pick_html = "".join(
         f'<button class="picker" data-store="{html.escape(st["key"])}">'
         f'<b>{html.escape(st["store"])}</b>'
@@ -490,7 +521,8 @@ def page() -> str:
   .note .x{{flex:0 0 auto;background:none;border:0;padding:2px 6px;margin:-4px -6px 0 0;
     color:inherit;font-size:1.3rem;line-height:1;opacity:.6}}
   .note .x:hover{{opacity:1}}
-  #loginbar{{margin:16px 0}}
+  #savebar{{margin:16px 0}}
+  .note button.go{{border:0;cursor:pointer;font:inherit;font-weight:700}}
   #w-redeem{{margin:0 0 18px}}
   .redeem-items{{list-style:none;margin:14px 0 0;padding:0}}
   .redeem-items li{{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;
@@ -661,19 +693,22 @@ def page() -> str:
   }}
 </style></head><body><div class="wrap">
 
-<div class="note" id="loginbar" role="status" aria-live="polite" hidden>
+<div class="note" id="savebar" role="status" aria-live="polite" hidden>
   <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"
     stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-    <circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></div>
+    <path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/>
+    <circle cx="7.5" cy="7.5" r="1.5"/></svg></div>
   <div class="txt">
-    <h3 id="loginbar-title"></h3>
-    <p id="loginbar-body"></p>
+    <h3>You could be saving money this week</h3>
+    <p id="savebar-body">No deals are loaded yet. A quick scan finds this week's sales
+      and coupons on the food already on your list - it takes about a minute,
+      and every deal it finds comes straight off your total.</p>
     <div class="acts">
-      <a class="go" id="loginbar-go" target="_blank" rel="noopener"></a>
-      <button type="button" class="later" id="loginbar-later">Maybe later</button>
+      <button type="button" class="go" id="savebar-go">Scan this week's deals &rarr;</button>
+      <button type="button" class="later" id="savebar-later">Maybe later</button>
     </div>
   </div>
-  <button type="button" class="x" id="loginbar-x" aria-label="Dismiss">&times;</button>
+  <button type="button" class="x" id="savebar-x" aria-label="Dismiss">&times;</button>
 </div>
 
 <header>
@@ -1261,6 +1296,7 @@ async function wizPoll() {{
     return;
   }}
   wizState.xml = d.xml || "";
+  refreshDeals();
   showRedeem(wizState.started && wizState.started.redeem, d.count, d.offers || []);
   if (!d.count) {{
     $("#w-done-title").textContent =
@@ -1302,41 +1338,43 @@ function askAccounts() {{
   }}
 }}
 
-function laterKey(site) {{ return "wss.loginLater." + site; }}
+// ---- "you could be saving money" ------------------------------------------
+// Shown at the top until a scan this week has found at least one deal for the
+// list. Its button opens the scan -- switching the panel on first if paused.
+let DEALS = {deals_json};
 
-// The bar at the top: shown while you are logged out of a store whose
-// coupons need an account. "Maybe later" hides it for this session.
-function paintLoginBar() {{
-  const bar = $("#loginbar");
-  let later = {{}};
-  const show = ACCOUNT_STORES.find(s => {{
-    try {{ later[s.site] = sessionStorage.getItem(laterKey(s.site)) === "1"; }}
-    catch (e) {{ later[s.site] = false; }}
-    return signedIn[s.site] === false && !later[s.site];
-  }});
-  if (!show) {{ bar.hidden = true; return; }}
-  $("#loginbar-title").textContent = show.login.title;
-  $("#loginbar-body").textContent = show.login.body;
-  const go = $("#loginbar-go");
-  go.textContent = (show.login.button || "Log in") + " \\u2192";
-  go.href = show.url || "#";
-  bar.dataset.site = show.site;
-  bar.hidden = false;
+function paintSaveBar() {{
+  let later = false;
+  try {{ later = sessionStorage.getItem("wss.saveLater") === "1"; }} catch (e) {{}}
+  $("#savebar").hidden = (DEALS.count || 0) > 0 || later;
 }}
 
-function loginLater() {{
-  const site = $("#loginbar").dataset.site;
-  try {{ sessionStorage.setItem(laterKey(site), "1"); }} catch (e) {{}}
-  $("#loginbar").hidden = true;
+function refreshDeals() {{
+  fetch("/api/state").then(r => r.json())
+    .then(d => {{ if (d.deals) {{ DEALS = d.deals; paintSaveBar(); }} }}).catch(() => {{}});
 }}
-$("#loginbar-later").onclick = loginLater;
-$("#loginbar-x").onclick = loginLater;
+
+$("#savebar-go").onclick = () => {{
+  const sw = $("#active-switch");
+  if ($("#scanwith").disabled && sw && sw.getAttribute("aria-checked") !== "true") {{
+    sw.click();                      // paused: switch on, then scan
+    setTimeout(() => $("#scanwith").click(), 400);
+  }} else {{
+    $("#scanwith").click();
+  }}
+}};
+function saveLater() {{
+  try {{ sessionStorage.setItem("wss.saveLater", "1"); }} catch (e) {{}}
+  $("#savebar").hidden = true;
+}}
+$("#savebar-later").onclick = saveLater;
+$("#savebar-x").onclick = saveLater;
+paintSaveBar();
 
 addEventListener("message", (e) => {{
   if (e.source !== window || !e.data || e.data.source !== "wss-scanner") return;
   if (e.data.type === "account") {{
     signedIn[e.data.store] = e.data.signedIn;
-    paintLoginBar();
     if (wizState.started && !$("#w-redeem").hidden) showRedeem(
       wizState.started.redeem, wizState.lastCount, wizState.lastOffers);
   }}
@@ -1652,6 +1690,7 @@ class Handler(BaseHTTPRequestHandler):
                 "themes": branding.themes(),
                 "last": _state["last"],
                 "active": scanning_active(),
+                "deals": deals_on_hand(),
             }), "application/json")
         return self._send(404, b"not found", "text/plain")
 

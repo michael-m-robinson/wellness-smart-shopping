@@ -7,25 +7,16 @@ const $ = (id) => document.getElementById(id);
 let tab = null;
 let storeList = [];
 
-// Logged out of a store whose coupons need an account (ShopRite)? Say so,
-// kindly, at the top. The answer comes from a cookie's name only.
+// Logged in to the stores whose coupons need an account (ShopRite)? Only
+// used to word a scan result. The answer comes from a cookie's name only.
 const loginState = {};
 async function checkLogins() {
   for (const s of storeList) {
-    if (!s.redeem || !s.redeem.login) continue;
+    if (!s.redeem || !s.redeem.signed_in) continue;
     const site = s.adapter && s.adapter !== "generic" ? s.adapter : s.key;
     const r = await chrome.runtime.sendMessage({ type: "wss-account", store: site });
     loginState[s.key] = r ? r.signedIn : null;
-    if (r && r.signedIn === false) {
-      $("login-title").textContent = s.redeem.login.title;
-      $("login-body").textContent = s.redeem.login.body;
-      $("login-go").textContent = (s.redeem.login.button || "Log in") + " \u2192";
-      $("login-go").href = (s.redeem.link && s.redeem.link.url) || "#";
-      $("login").hidden = false;
-      return;
-    }
   }
-  $("login").hidden = true;
 }
 
 // After a filed scan: what the store needs before the deals count (ShopRite:
@@ -101,6 +92,8 @@ async function load() {
 
   storeList = st.stores || [];
   fillStores(storeList, st.guess);
+  // No deals on hand this week: say what a scan is worth.
+  $("save").hidden = !(st.panel && st.panel.deals && st.panel.deals.count === 0);
   checkLogins();
   paintSites(st.sites || [], st.lastCheck);
   if (!/^https?:/.test(st.url)) {
