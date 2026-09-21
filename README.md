@@ -81,18 +81,25 @@ cut, because the numbers are on their side.
 
 ## What you need
 
-**Pick one route — you do not need both:**
+**Two routes. Terminal is the one to start with.**
 
-| Route | What you run | Good for |
+| Route | What you run | |
 | --- | --- | --- |
-| **Desktop app** | Drag it in from the disk image, press **Scan with Claude** | Meal plans, recipes and PDFs as well as deals |
-| **Terminal** | `python3 panel.py` (or `python3 crawl.py`) | The panel and the sales file on their own |
+| **Terminal** — recommended | `python3 panel.py` | Everything lives in one folder you can see: your config, your scans, the sales file. Nothing to find, nothing to permit. |
+| **Desktop app** | Drag it in, press **Scan with Claude** | Adds meal plans, recipes and PDFs. Keeps its files in `~/Library/Application Support/`, away from the folder you are working in. |
 
-Both open the same control panel, hand Claude the same instruction and produce
-the same file. The instruction names no folder and no file, so it reads exactly
-the same whichever one started the panel.
+Both open the same control panel and produce the same file, and the scan
+instruction is identical either way.
 
-Then, either way:
+**Why Terminal first.** The app is a normal macOS app, so it keeps its data in
+Application Support rather than beside the project. That is correct for an
+installed app, but it puts your scans and sales files somewhere other tools —
+including Claude Code — may not be allowed to reach, and a blocked read there
+looks like the scan failing rather than a permission being missing. From
+Terminal, everything sits in the folder you cloned, which sidesteps that
+entirely. Use the app when you want the meal planning and the PDFs.
+
+Then, either way:Then, either way:
 
 | Requirement | Why |
 | --- | --- |

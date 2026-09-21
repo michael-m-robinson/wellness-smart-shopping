@@ -8,18 +8,21 @@ nothing to keep up to date -- `requirements.txt` here is deliberately empty.
 What the project needs instead is a few tools. `../install.command` checks all
 of them, tells you which are missing, and offers to set up what it safely can.
 
-**You need one of these two, not both:**
+**Two routes. Terminal is the one to start with.**
 
-| Route | What you run | Good for |
+| Route | What you run | |
 | --- | --- | --- |
-| **The desktop app** | Drag it in from the disk image, press **Scan with Claude** | Meal plans, recipes and PDFs as well as deals |
-| **Terminal** | `python3 panel.py`, or `python3 crawl.py` | The panel and the sales file on their own, no app |
+| **Terminal** — recommended | `python3 panel.py`, or `python3 crawl.py` | Config, scans and sales files all sit in the folder you cloned |
+| **Desktop app** | Drag it in from the disk image, press **Scan with Claude** | Adds meal plans, recipes and PDFs; keeps its files in `~/Library/Application Support/` |
 
 Both open the same control panel and produce the same file. The scan
-instruction is identical either way — it names no folder and no file, so it
-does not matter which one started the panel.
+instruction is identical either way — it names no folder and no file.
 
-Then, whichever route you took:
+Terminal is recommended because everything stays in one visible folder. The
+app keeps its data in Application Support, which is correct for an installed
+app but puts your files somewhere other tools may not be permitted to read.
+
+Then, whichever route you took:Then, whichever route you took:
 
 | Requirement | Needed for | How to get it |
 | --- | --- | --- |
