@@ -971,6 +971,18 @@ class TestScanDelivery(unittest.TestCase):
             text = " ".join(value) if isinstance(value, list) else str(value)
             self.assertNotIn("weekly ad", text.lower(), key)
 
+    def test_editing_one_number_leaves_the_others_calculated(self):
+        """Sending all four boxes pinned the lot: editing protein froze
+        calories at whatever figure happened to be on screen."""
+        source = open(self.panel.__file__, encoding="utf-8").read()
+        self.assertIn("saveTiles(field, el.value", source)
+        self.assertIn("Only the box that changed is sent", source)
+
+    def test_units_are_shown_beside_the_editable_numbers(self):
+        """They are number inputs, so the g cannot live in the value."""
+        self.assertIn('<i>g</i>', self.html)
+        self.assertIn("text-transform:none", self.html)
+
     def test_paste_box_exists_as_a_fallback(self):
         self.assertIn('id="w-paste"', self.html)
         self.assertIn('id="w-paste-go"', self.html)

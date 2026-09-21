@@ -280,7 +280,7 @@ def how_to_steps(store_name: str) -> str:
          "A panel slides in from the side."),
         ("paste", "Paste and press return",
          "Press Copy below, paste it into that panel, and press return. "
-         "Claude reads the page and saves the deals."),
+         "Claude reads the page and sends the deals straight back here."),
     ]
     out = []
     for index, (art, title, body) in enumerate(steps, start=1):
@@ -464,6 +464,14 @@ def page() -> str:
   .targets .t{{flex:1 1 92px;background:var(--bg);border-radius:10px;
     padding:10px 12px;min-width:92px}}
   .targets .t b{{display:block;font-size:1.28rem;line-height:1.2}}
+  /* .num is a span, so it would otherwise inherit the sublabel's uppercase
+     and muted colour and render the unit as a small grey "G". */
+  .targets .t .num{{display:flex;align-items:baseline;gap:1px;
+    text-transform:none;color:var(--ink);font-size:1rem}}
+  .targets .t .num i{{font-style:normal;font-size:1.28rem;font-weight:700;
+    line-height:1.2}}
+  .targets .t .num input{{width:auto;min-width:0;flex:0 1 auto;
+    field-sizing:content}}
   .targets .t input{{display:block;width:100%;font:inherit;font-size:1.28rem;
     font-weight:700;line-height:1.2;padding:0;border:0;background:none;
     color:var(--ink);border-bottom:1.5px dashed transparent;
@@ -543,14 +551,17 @@ def page() -> str:
       <input type="number" id="t-cal" min="800" max="8000" value="{tgt['calories']}"
              aria-label="Calories per day"><span>kcal / day</span></div>
     <div class="t{' mine' if 'protein' in tgt.get('custom_fields', []) else ''}">
-      <input type="number" id="t-pro" min="0" max="500" value="{tgt['protein']}"
-             aria-label="Protein grams"><span>protein</span></div>
+      <span class="num"><input type="number" id="t-pro" min="0" max="500"
+             value="{tgt['protein']}" aria-label="Protein grams"><i>g</i></span>
+      <span>protein</span></div>
     <div class="t{' mine' if 'carbs' in tgt.get('custom_fields', []) else ''}">
-      <input type="number" id="t-car" min="0" max="900" value="{tgt['carbs']}"
-             aria-label="Carbohydrate grams"><span>carbs</span></div>
+      <span class="num"><input type="number" id="t-car" min="0" max="900"
+             value="{tgt['carbs']}" aria-label="Carbohydrate grams"><i>g</i></span>
+      <span>carbs</span></div>
     <div class="t{' mine' if 'fat' in tgt.get('custom_fields', []) else ''}">
-      <input type="number" id="t-fat" min="0" max="400" value="{tgt['fat']}"
-             aria-label="Fat grams"><span>fat</span></div>
+      <span class="num"><input type="number" id="t-fat" min="0" max="400"
+             value="{tgt['fat']}" aria-label="Fat grams"><i>g</i></span>
+      <span>fat</span></div>
     <div class="t"><b id="t-goal">{html.escape(tgt['goal_label'])}</b><span>goal</span></div>
   </div>
   <button id="t-reset" class="linkish"{'' if tgt.get('custom') else ' hidden'}>Back to the calculated figures</button>
@@ -1060,12 +1071,12 @@ function render(d) {{
 const TILES = {{"#t-cal": "custom_calories", "#t-pro": "custom_protein",
                 "#t-car": "custom_carbs", "#t-fat": "custom_fat"}};
 
-async function saveTiles() {{
+async function saveTiles(field, value) {{
+  // Only the box that changed is sent. Sending all four would pin the other
+  // three at whatever figure they happened to be showing, which is how
+  // editing protein silently froze calories.
   const body = {{}};
-  for (const [sel, field] of Object.entries(TILES)) {{
-    const raw = $(sel).value.trim();
-    body[field] = raw === "" ? null : Number(raw);
-  }}
+  body[field] = value === "" ? null : Number(value);
   const r = await fetch("/api/profile", {{
     method: "POST", headers: {{"Content-Type": "application/json"}},
     body: JSON.stringify(body)}});
@@ -1080,9 +1091,9 @@ async function saveTiles() {{
   $("#t-reset").hidden = !d.target.custom;
 }}
 
-Object.keys(TILES).forEach(sel => {{
+Object.entries(TILES).forEach(([sel, field]) => {{
   const el = $(sel);
-  el.addEventListener("change", saveTiles);
+  el.addEventListener("change", () => saveTiles(field, el.value.trim()));
   el.addEventListener("keydown", e => {{ if (e.key === "Enter") el.blur(); }});
 }});
 
