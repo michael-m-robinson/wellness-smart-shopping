@@ -580,6 +580,24 @@ It appears in the control panel immediately, with its own scan directions and
 its own `harvest/mymarket.txt`. The matcher, price maths and XML writer are
 shared, so any store benefits from them.
 
+### The scan prompt
+
+Each store hands Claude its own instruction. ShopRite's is specific because its
+coupons sit in a cross-origin frame that a plain "read this page" can't see;
+every other store gets a general one that loads all offers, checks the count
+and posts them back. If your store needs something particular, give it a
+`"prompt"` in `config.json` -- write `{submit}` where the panel's address goes:
+
+```json
+"mymarket": {
+  "name": "My Local Market",
+  "prompt": "Open the Coupons tab, click Load More until it stops, then list each offer as: product name | price | limit, and POST the list as plain text to {submit}"
+}
+```
+
+To use one wording for every store instead, set `scan_prompt` in
+`branding.json`. It's empty by default, which means "use each store's own".
+
 ## The sales XML format
 
 **[docs/XML-IMPORT.md](docs/XML-IMPORT.md)** documents the file the app imports,

@@ -937,23 +937,32 @@ class TestScanDelivery(unittest.TestCase):
     def test_prompt_works_from_either_route(self):
         """Terminal or desktop app, the instruction must read the same: it can
         name no folder, because the two installs keep files in different
-        places."""
-        prompt = self.brand["scan_prompt"]
-        for local in ("harvest/", ".txt", "browser/", "panel.py", "/Users/"):
-            self.assertNotIn(local, prompt, local)
-        self.assertIn("{submit}", prompt)
+        places. That holds for every store's own prompt and the generic one."""
+        from dealcrawler import stores
+        templates = [stores.GENERIC_PROMPT] + [
+            st.prompt for st in stores.load(self.panel.load_config()) if st.prompt]
+        for prompt in templates:
+            for local in ("harvest/", ".txt", "browser/", "panel.py", "/Users/"):
+                self.assertNotIn(local, prompt, local)
+            self.assertIn("{submit}", prompt)
 
     def test_prompt_carries_the_panels_real_address(self):
-        import json as _json
         from dealcrawler import stores
-        store = stores.get("shoprite", self.panel.load_config())
-        self.panel._base["url"] = "http://127.0.0.1:9999"
-        submit = f"{self.panel._base['url']}/api/scan/submit?store={store.key}"
-        filled = self.brand["scan_prompt"].format(
-            store=store.name, path=store.harvest_path, submit=submit,
-            script=f"{self.panel._base['url']}/harvest.js")
-        self.assertIn("9999", filled)
-        self.panel._base["url"] = "http://127.0.0.1:8765"
+        for st in stores.load(self.panel.load_config()):
+            submit = f"http://127.0.0.1:9999/api/scan/submit?store={st.key}"
+            filled = st.instruction(submit)
+            self.assertIn(submit, filled, st.key)
+            self.assertNotIn("{submit}", filled, st.key)
+
+    def test_store_prompt_used_unless_overridden(self):
+        """ShopRite's own prompt reaches the user; a branding override replaces
+        it and may contain braces without crashing the scan."""
+        from dealcrawler import stores
+        shoprite = stores.get("shoprite", self.panel.load_config())
+        self.assertIn("scrollable-container", shoprite.instruction("S"))
+        odd = 'Read {"x": 1} then .a{b} and POST to {submit}'
+        self.assertEqual(shoprite.instruction("S", override=odd),
+                         'Read {"x": 1} then .a{b} and POST to S')
 
     def test_script_is_served_for_those_who_prefer_it(self):
         source = open(self.panel.__file__, encoding="utf-8").read()

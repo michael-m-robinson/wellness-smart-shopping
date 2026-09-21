@@ -62,6 +62,35 @@ def _touch(closing=False):
     _alive["closing"] = closing
 
 
+# ---- accepting scans -------------------------------------------------------
+# What the switch on the panel reflects. This is written to disk rather than
+# held in memory because the panel shuts itself down when its window closes:
+# an in-memory flag would quietly flip back to "active" on the next launch,
+# which is the opposite of what someone who paused it asked for.
+_ACTIVE_FILE = "panel_state.json"
+
+
+def scanning_active() -> bool:
+    """True when the panel is accepting scans."""
+    try:
+        with open(paths.data(_ACTIVE_FILE)) as fh:
+            return bool(json.load(fh).get("active", True))
+    except (OSError, ValueError):
+        return True          # absent or unreadable: active, as on first run
+
+
+def set_scanning_active(value: bool) -> bool:
+    value = bool(value)
+    path = paths.data(_ACTIVE_FILE)
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as fh:
+            json.dump({"active": value}, fh)
+    except OSError:
+        pass                 # a read-only data dir should not break the toggle
+    return value
+
+
 def _watchdog(server, idle_timeout):
     if idle_timeout <= 0:
         return
@@ -308,8 +337,23 @@ def page() -> str:
     g = lambda k: html.escape(str(brand.get(k, "")))
     # For values embedded in JavaScript: JSON-encode (quotes included) rather
     # than HTML-escape, which would leak entities into textContent.
-    j = lambda k: json.dumps(str(brand.get(k, "")))
+    # JSON-encode, then neutralise the sequences that would end the <script>
+    # block early: json.dumps escapes quotes but leaves "</script>" intact, so
+    # a single "<" in any branded string would otherwise break every script
+    # below it.
+    j = lambda k: (json.dumps(str(brand.get(k, "")))
+                   .replace("<", "\\u003c").replace(">", "\\u003e")
+                   .replace("&", "\\u0026"))
     theme = brand.get("theme") or "50s-1"
+    # Rendered server-side from the real state, so the card does not flash
+    # "active" and then correct itself once /api/state comes back.
+    active_now = scanning_active()
+    active_cls = "" if active_now else " paused"
+    active_aria = "true" if active_now else "false"
+    active_title = g('panel_active_title') if active_now else g('panel_paused_title')
+    active_body = g('panel_active_body') if active_now else g('panel_paused_body')
+    active_lbl = g('panel_switch_on') if active_now else g('panel_switch_off')
+    scan_dis = "" if active_now else " disabled"
     theme_files = {t["name"]: t["file"] for t in branding.themes()}
     theme_focus = {t["name"]: t["focus"] for t in branding.themes()}
     banner_file = theme_files.get(theme) or next(iter(theme_files.values()), "")
@@ -403,6 +447,23 @@ def page() -> str:
   button:hover{{border-color:var(--accent)}}
   button.primary{{background:var(--accent);color:var(--accent-ink);border-color:transparent}}
   button[disabled]{{opacity:.6;cursor:progress}}
+  #activecard{{padding:15px 20px}}
+  #activecard h2{{margin:0;display:flex;align-items:center;gap:9px}}
+  #activecard p{{margin:3px 0 0}}
+  .switchrow{{display:flex;align-items:center;justify-content:space-between;gap:16px}}
+  .dot{{width:10px;height:10px;border-radius:50%;background:var(--good);flex:none}}
+  #activecard.paused .dot{{background:transparent;border:2px solid var(--muted)}}
+  button.switch{{display:inline-flex;align-items:center;gap:6px;flex:none;
+    width:88px;padding:5px;border-radius:999px;border:1px solid transparent;
+    background:var(--good);color:#fff;transition:background .18s ease}}
+  button.switch:hover{{border-color:var(--ink)}}
+  button.switch .lbl{{flex:1;text-align:center;font-size:.78rem;
+    font-weight:700;letter-spacing:.06em}}
+  button.switch .knob{{width:22px;height:22px;border-radius:50%;background:#fff;
+    flex:none;box-shadow:0 1px 3px rgba(0,0,0,.35)}}
+  button.switch[aria-checked="false"]{{background:var(--muted);flex-direction:row-reverse}}
+  button.switch:focus-visible{{outline:2px solid var(--accent);outline-offset:3px}}
+  #scanwith[disabled]{{cursor:not-allowed}}
   .card{{background:var(--card);border:1px solid var(--line);border-radius:14px;
     padding:18px 20px;margin-bottom:18px}}
   h2{{margin:0 0 12px;font-size:1.04rem;letter-spacing:.01em}}
@@ -535,6 +596,20 @@ def page() -> str:
   </div>
 </header>
 
+<div class="card{active_cls}" id="activecard">
+  <div class="switchrow">
+    <div class="switchtxt">
+      <h2><span class="dot" id="active-dot"></span><span id="active-label">{active_title}</span></h2>
+      <p class="muted" id="active-note">{active_body}</p>
+    </div>
+    <button type="button" class="switch" id="active-switch" role="switch"
+            aria-checked="{active_aria}" aria-labelledby="active-label">
+      <span class="lbl" id="active-state">{active_lbl}</span>
+      <span class="knob"></span>
+    </button>
+  </div>
+</div>
+
 <div class="card warn" id="extbar" hidden>
   <div class="store-line"><h2 id="ext-title">{g('extension_title')}</h2></div>
   <p class="muted" id="ext-body">{g('extension_body')}</p>
@@ -546,7 +621,7 @@ def page() -> str:
 </div>
 
 <div class="row">
-  <button class="primary" id="scanwith">{g('scan_button')}</button>
+  <button class="primary" id="scanwith"{scan_dis}>{g('scan_button')}</button>
   <button id="refresh">{g('refresh_button')}</button>
   <button id="howto">{g('import_button')}</button>
 </div>
@@ -862,6 +937,38 @@ $("#saveprofile").onclick = async () => {{
 }};
 
 if ({first_run_js}) profDlg.showModal();
+
+// ---- accepting-scans switch ------------------------------------------------
+// Paused means the panel keeps serving this page but refuses a posted scan,
+// so the switch stays reachable either way.
+const actSw = $("#active-switch");
+const PANEL_TXT = {{
+  onTitle: {j('panel_active_title')}, onBody: {j('panel_active_body')},
+  offTitle: {j('panel_paused_title')}, offBody: {j('panel_paused_body')},
+  onLbl: {j('panel_switch_on')}, offLbl: {j('panel_switch_off')}
+}};
+function paintActive(on) {{
+  actSw.setAttribute("aria-checked", on ? "true" : "false");
+  $("#active-state").textContent = on ? PANEL_TXT.onLbl : PANEL_TXT.offLbl;
+  $("#active-label").textContent = on ? PANEL_TXT.onTitle : PANEL_TXT.offTitle;
+  $("#active-note").textContent = on ? PANEL_TXT.onBody : PANEL_TXT.offBody;
+  $("#activecard").classList.toggle("paused", !on);
+  $("#scanwith").disabled = !on;
+}}
+actSw.onclick = async () => {{
+  const next = actSw.getAttribute("aria-checked") !== "true";
+  paintActive(next);                       // optimistic
+  try {{
+    const r = await fetch("/api/panel", {{
+      method: "POST", headers: {{"Content-Type": "application/json"}},
+      body: JSON.stringify({{active: next}})}});
+    paintActive(!!(await r.json()).active); // authoritative
+  }} catch (e) {{
+    paintActive(!next);                    // server unreachable: put it back
+  }}
+}};
+fetch("/api/state").then(r => r.json())
+  .then(d => paintActive(d.active !== false)).catch(() => {{}});
 
 // ---- keep-alive ------------------------------------------------------------
 // The panel stops once this page goes away, so closing the tab does not leave
@@ -1245,6 +1352,7 @@ class Handler(BaseHTTPRequestHandler):
                 "branding": branding.load(),
                 "themes": branding.themes(),
                 "last": _state["last"],
+                "active": scanning_active(),
             }), "application/json")
         return self._send(404, b"not found", "text/plain")
 
@@ -1283,6 +1391,12 @@ class Handler(BaseHTTPRequestHandler):
             # The scan itself, posted straight from the store page. A browser
             # extension cannot write to disk, so the page hands it over here
             # and the panel saves it.
+            if not scanning_active():
+                # Paused: refuse loudly and write nothing, so the scanning side
+                # can show the list instead of believing it was filed.
+                return self._send(409, json.dumps(
+                    {"error": "the panel is paused and is not accepting scans",
+                     "active": False}), "application/json")
             from urllib.parse import parse_qs, urlparse
             query = parse_qs(urlparse(self.path).query)
             key = (query.get("store") or [""])[0]
@@ -1301,6 +1415,18 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps(
                 {"saved": store.harvest_path, "lines": len(lines),
                  "store": store.name}), "application/json")
+
+        if path == "/api/panel":
+            # The switch on the main interface. Absent "active", report only.
+            try:
+                body = json.loads(raw.decode("utf-8") or "{}")
+            except ValueError:
+                return self._send(400, json.dumps({"error": "bad json"}),
+                                  "application/json")
+            if "active" in body:
+                set_scanning_active(body.get("active"))
+            return self._send(200, json.dumps({"active": scanning_active()}),
+                              "application/json")
 
         if path == "/api/bye":
             # Sent as the page unloads. A reload will ping again within seconds.
@@ -1329,11 +1455,21 @@ class Handler(BaseHTTPRequestHandler):
                 _alive["scanning_since"] = time.monotonic()
                 submit = f"{_base['url']}/api/scan/submit?store={store.key}"
                 script = f"{_base['url']}/harvest.js"
-                prompt = str(brand.get("scan_prompt", "")).format(
-                    store=store.name, path=store.harvest_path,
-                    submit=submit, script=script)
-                prompt_script = str(brand.get("scan_prompt_script", "")).format(
-                    store=store.name, submit=submit, script=script)
+                # The store's own prompt is what gets used. Sites differ
+                # enough -- a widget in a cross-origin frame, a scroll that
+                # has to be driven -- that a single generic instruction comes
+                # back with a fraction of the offers, which is why stores.py
+                # carries one per store. branding's scan_prompt overrides it
+                # when set, and is empty by default.
+                prompt = store.instruction(
+                    submit, script=script,
+                    override=str(brand.get("scan_prompt", "")).strip())
+                # Same brace-safe substitution for the script variant.
+                prompt_script = str(brand.get("scan_prompt_script", ""))
+                for token, value in (("{store}", store.name),
+                                     ("{submit}", submit),
+                                     ("{script}", script)):
+                    prompt_script = prompt_script.replace(token, value)
                 return self._send(200, json.dumps({
                     "store": store.key, "name": store.name, "urls": store.urls,
                     "path": store.harvest_path, "prompt": prompt,

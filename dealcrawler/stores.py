@@ -90,10 +90,24 @@ class Store:
     enabled: bool = True
     prompt: str = ""
 
-    def instruction(self, submit: str) -> str:
-        """What to give Claude, with the panel's address filled in."""
-        template = self.prompt or GENERIC_PROMPT
-        return template.replace("{submit}", submit)
+    def instruction(self, submit: str, script: str = "", override: str = "") -> str:
+        """What to give Claude, with the panel's address filled in.
+
+        `override` is branding.json's scan_prompt: when set it is used for
+        every store. Otherwise the store's own prompt is used -- a generic
+        "read this page" instruction quietly returns a fraction of the offers
+        on a site like ShopRite, whose coupons sit in a cross-origin iframe --
+        and GENERIC_PROMPT covers stores that define none.
+
+        Substitution is plain replacement, not str.format -- a prompt naming a
+        CSS selector or a snippet of JS is full of braces.
+        """
+        template = override or self.prompt or GENERIC_PROMPT
+        for token, value in (("{submit}", submit), ("{script}", script),
+                             ("{store}", self.name),
+                             ("{path}", self.harvest_path)):
+            template = template.replace(token, value)
+        return template
 
     @property
     def harvest_path(self) -> str:

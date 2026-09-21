@@ -13,6 +13,7 @@ offers.txt
 
 __pycache__/
 *.pyc
+*.bak
 .DS_Store
 
 # Built app bundle

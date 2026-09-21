@@ -98,13 +98,13 @@ DEFAULTS: Dict[str, str] = {
                         "in to it, and Claude reads this week's offers straight "
                         "off the page."),
     "scan_wait_title": "Scanning {store}",
-    # {submit} is the panel's own address, filled in at the time. The prompt
-    # names no file and no folder, so it reads the same whether the panel was
-    # started from Terminal or by the desktop app.
-    "scan_prompt": ("Scan this page for grocery deals. Scroll to the bottom so "
-                    "every offer loads, then list each one on its own line as: "
-                    "product name | price | limit. POST that list as plain text "
-                    "to {submit}"),
+    # Each store carries its own scan prompt (see dealcrawler/stores.py): a
+    # generic "read this page" instruction quietly returns a fraction of the
+    # offers on a site whose coupons sit in a cross-origin iframe. Leave this
+    # empty to use the store's own. Set it and your wording is used instead,
+    # for every store that does not define one. {submit} is filled in with the
+    # panel's own address, {store} with the store name.
+    "scan_prompt": "",
     "scan_prompt_script": ("Fetch {script} and run it on this page. It scans the "
                            "offers and sends them back on its own."),
     "scan_wait_body": ("Open the store below and sign in, then give Claude the "
@@ -132,6 +132,15 @@ DEFAULTS: Dict[str, str] = {
     "refresh_working": "Checking stores...",
     "import_button": "How to Import",
     "save_button": "Save",
+
+    # The switch on the main interface. Paused keeps the panel serving this
+    # page but refuses a posted scan, so both halves need wording.
+    "panel_active_title": "Panel is active",
+    "panel_active_body": "Accepting scans from Chrome.",
+    "panel_paused_title": "Panel is paused",
+    "panel_paused_body": "Scans will be refused until you turn this back on.",
+    "panel_switch_on": "ON",
+    "panel_switch_off": "OFF",
 
     "scan_title": "Scanning a store for deals",
     "scan_intro": ("Deals come last on purpose. Your meals and your shopping "
