@@ -392,7 +392,13 @@ print(validate(open('out/shoprite-sales-2026-09-20.xml').read()) or 'clean')"</c
       <div class="expect">The window <b>stays put</b>; it does not vanish when the app loses focus.</div></div></li>
     <li class="check"><input type="checkbox" id="c37"><div>
       <div class="do">Create the PDFs</div>
-      <div class="expect">Shopping list, recipes and daily meals, priced around your imported deals.</div></div></li>
+      <div class="expect">Shopping list, recipes and daily meals, priced against your imported deals.</div></div></li>
+    <li class="check"><input type="checkbox" id="c37b"><div>
+      <div class="do">Untick <b>Apply deals to the list</b>, create the list again, and compare it to the last one</div>
+      <div class="expect">The <b>same items in the same order</b> &mdash; only the total differs. Deals are looked up after the list is settled, so they change what you pay, never what you buy. A different set of items here is a bug.</div></div></li>
+    <li class="check"><input type="checkbox" id="c37c"><div>
+      <div class="do">Tick it back on and look for a swap offer</div>
+      <div class="expect">Any substitute stays inside one role &mdash; a protein for a protein, a grain for a grain &mdash; skips recipe-required items and favourites, and is yours to accept or decline.</div></div></li>
     <li class="check"><input type="checkbox" id="c38"><div>
       <div class="do">Quit the app</div>
       <div class="expect">The control panel stops with it &mdash; the app started it, so the app stops it.</div>

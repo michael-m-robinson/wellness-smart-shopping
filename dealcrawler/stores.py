@@ -18,10 +18,52 @@ HARVEST_DIR = paths.data("harvest")
 
 # Sensible starting points. Everything here is overridable in config.json, and
 # `store_id` is templated into the URLs so you point at your own branch.
+# A store can carry its own instruction. Where a site needs particular handling
+# -- a widget in a cross-origin frame, an infinite scroll that has to be driven
+# -- a generic "read the page" prompt quietly returns a fraction of the offers,
+# so the specifics are written down per store. {submit} is filled in with the
+# panel's own address. Stores without one get GENERIC_PROMPT.
+SHOPRITE_PROMPT = """Scan the ShopRite digital coupons page for offers.
+
+Don't scroll this page - the coupons sit in a cross-origin iframe that blocks
+JS, the accessibility tree and the network log. Instead open the widget
+standalone at https://shop-rite-web-prod.azurewebsites.net/ (it keeps my store
+context), then drive its infinite scroll by setting .scrollable-container
+scrollTop to scrollHeight repeatedly until .card.coupon-item stops growing.
+
+Read the DOM: .coupon-savings, .coupon-desc (the full text is there; the
+ellipsis is CSS only) and .coupon-badge for "Limit N".
+
+Emit one line per offer:  product name | $X.XX off | limit
+- price is the discount amount
+- limit is the "Limit N" badge, or "no limit" if the page says none
+- for the product name, drop the leading "Save $X.XX on/when you buy ONE (1)"
+  and cut at "(excludes", "*Redeem", or a repeated "Save $" tail
+- sanity check: your line count and your "Limit" count must match the page's
+  own "All Coupons (N)" and its "Limit" count
+
+Then POST the lines as plain text to {submit}
+Probe that endpoint first. If it is not reachable, say so and show me the list
+rather than dropping it."""
+
+GENERIC_PROMPT = """Scan this page for grocery deals.
+
+Load every offer first - if the list scrolls or pages, keep going until it
+stops growing. Then emit one line per offer:  product name | price | limit
+- price is the sale price, or the discount if that is what is shown
+- limit is the purchase cap if the page gives one, otherwise "no limit"
+- keep the product name as written, minus any "Save $X.XX on" preamble
+- sanity check your count against any total the page states
+
+Then POST the lines as plain text to {submit}
+Probe that endpoint first. If it is not reachable, say so and show me the list
+rather than dropping it."""
+
 DEFAULT_STORES: Dict[str, dict] = {
     "shoprite": {
         "name": "ShopRite",
         "store_id": "000",
+        "prompt": SHOPRITE_PROMPT,
         "urls": [
             {"label": "Open the digital coupon list",
              "url": "https://www.shoprite.com/sm/planning/rsid/{store_id}/digital-coupon"},
@@ -46,6 +88,12 @@ class Store:
     name: str
     urls: List[dict] = field(default_factory=list)
     enabled: bool = True
+    prompt: str = ""
+
+    def instruction(self, submit: str) -> str:
+        """What to give Claude, with the panel's address filled in."""
+        template = self.prompt or GENERIC_PROMPT
+        return template.replace("{submit}", submit)
 
     @property
     def harvest_path(self) -> str:
@@ -101,7 +149,8 @@ def load(config: dict = None) -> List[Store]:
                 else:
                     url = url.replace("{store_id}", store_id)
             urls.append({"label": entry.get("label", "Open the store"), "url": url})
-        out.append(Store(key=key, name=base.get("name", key.title()), urls=urls))
+        out.append(Store(key=key, name=base.get("name", key.title()), urls=urls,
+                         prompt=str(base.get("prompt", "") or "")))
     return out
 
 

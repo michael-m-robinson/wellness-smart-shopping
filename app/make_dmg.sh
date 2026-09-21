@@ -25,7 +25,8 @@ WINDOW_W=700
 WINDOW_H=460
 
 cleanup() {
-  [ -n "${MOUNTED:-}" ] && hdiutil detach "$MOUNTED" -force -quiet 2>/dev/null || true
+  [ -n "${MOUNTED:-}" ] && [ -d "${MOUNTED:-}" ] && \
+      hdiutil detach "$MOUNTED" -force -quiet 2>/dev/null || true
   rm -rf "$STAGE" "$RW_DMG"
 }
 trap cleanup EXIT
@@ -53,8 +54,12 @@ hdiutil create -srcfolder "$STAGE" -volname "$VOLUME" -fs HFS+ \
     -fsargs "-c c=64,a=16,e=16" -format UDRW -size "${SIZE_KB}k" \
     -quiet "$RW_DMG"
 
-MOUNTED="/Volumes/$VOLUME"
-hdiutil attach "$RW_DMG" -readwrite -noverify -noautoopen -quiet
+MOUNTED="$(hdiutil attach "$RW_DMG" -readwrite -noverify -noautoopen -plist \
+    | python3 -c 'import plistlib,sys
+e=[x.get("mount-point") for x in plistlib.loads(sys.stdin.buffer.read())["system-entities"]]
+print(next(p for p in e if p))')"
+[ -d "$MOUNTED" ] || { echo "  ! the image did not mount" >&2; exit 1; }
+VOLUME="$(basename "$MOUNTED")"
 sleep 2
 
 # --- lay the window out ------------------------------------------------------
@@ -99,7 +104,10 @@ MOUNTED=""
 echo "  compressing ..."
 mkdir -p "$DIST"
 rm -f "$DMG"
-hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -quiet -o "$DMG"
+if ! hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -quiet -o "$DMG"; then
+  echo "  ! could not compress the image" >&2
+  exit 1
+fi
 
 SIZE=$(du -h "$DMG" | cut -f1 | tr -d ' ')
 echo

@@ -583,21 +583,21 @@ func makeShoppingPlan(options: ListOptions, items: [ShoppingItem], prices: Price
 
     var included = eligible.filter { requiredItemIDs.contains($0.item.id) || budgetPriority(for: $0.item, goal: options.nutritionGoal) == 1 || favorites.contains($0.item.id) }
     var includedIDs = Set(included.map { $0.item.id })
-    var total = included.reduce(0) { $0 + $1.lineTotal }
-    func effectivePriority(_ row: PlannedRow) -> Int {
-        let base = budgetPriority(for: row.item, goal: options.nutritionGoal)
-        guard options.prioritizeSales, options.saleItemIDs.contains(row.item.id), row.couponSavings > 0 else { return base }
-        // A verified sale can move a premium ingredient ahead of an unsold peer,
-        // but never ahead of the core low-cost staples required for the month.
-        return max(2, base - 4)
+    // What lands in the basket is decided on need alone, at the shelf price, with
+    // offers deliberately ignored. Look the deals up first and the coupons start
+    // choosing your groceries for you. Deals are applied to this list once it is
+    // settled, and proposeSaleSwaps then offers substitutes for what is on it.
+    var shelfTotal = included.reduce(0) { $0 + $1.grossLineTotal }
+    func needPriority(_ row: PlannedRow) -> Int {
+        budgetPriority(for: row.item, goal: options.nutritionGoal)
     }
     let candidates = eligible.filter { !includedIDs.contains($0.item.id) }.sorted {
-        let left = (effectivePriority($0), $0.lineTotal, $0.item.name)
-        let right = (effectivePriority($1), $1.lineTotal, $1.item.name)
+        let left = (needPriority($0), $0.grossLineTotal, $0.item.name)
+        let right = (needPriority($1), $1.grossLineTotal, $1.item.name)
         return left < right
     }
 
-    let availableCents = max(0, Int(((options.budgetMax - total) * 100).rounded(.down)))
+    let availableCents = max(0, Int(((options.budgetMax - shelfTotal) * 100).rounded(.down)))
     if availableCents > 0, !candidates.isEmpty {
         struct CandidateSelection {
             let indexes: [Int]
@@ -606,9 +606,9 @@ func makeShoppingPlan(options: ListOptions, items: [ShoppingItem], prices: Price
         var selections = [CandidateSelection?](repeating: nil, count: availableCents + 1)
         selections[0] = CandidateSelection(indexes: [], valueScore: 0)
         for (index, row) in candidates.enumerated() {
-            let cost = max(1, Int((row.lineTotal * 100).rounded()))
+            let cost = max(1, Int((row.grossLineTotal * 100).rounded()))
             guard cost <= availableCents else { continue }
-            let rowScore = max(1, 12 - effectivePriority(row))
+            let rowScore = max(1, 12 - needPriority(row))
             for subtotal in stride(from: availableCents, through: cost, by: -1) {
                 guard let previous = selections[subtotal - cost] else { continue }
                 let proposed = CandidateSelection(indexes: previous.indexes + [index], valueScore: previous.valueScore + rowScore)
@@ -618,7 +618,7 @@ func makeShoppingPlan(options: ListOptions, items: [ShoppingItem], prices: Price
             }
         }
         let targetCents = Int((targetSpend * 100).rounded())
-        let baseCents = Int((total * 100).rounded())
+        let baseCents = Int((shelfTotal * 100).rounded())
         let bestSubtotal = selections.indices.filter { selections[$0] != nil }.min { left, right in
             let leftDistance = abs(targetCents - (baseCents + left))
             let rightDistance = abs(targetCents - (baseCents + right))
@@ -632,7 +632,7 @@ func makeShoppingPlan(options: ListOptions, items: [ShoppingItem], prices: Price
             let row = candidates[index]
             included.append(row)
             includedIDs.insert(row.item.id)
-            total += row.lineTotal
+            shelfTotal += row.grossLineTotal
         }
     }
 
@@ -642,6 +642,7 @@ func makeShoppingPlan(options: ListOptions, items: [ShoppingItem], prices: Price
         included.sort { ($0.item.meal, $0.item.aisle, $0.item.name) < ($1.item.meal, $1.item.aisle, $1.item.name) }
     }
 
+    let total = included.reduce(0) { $0 + $1.lineTotal }
     let grossSubtotal = included.reduce(0) { $0 + $1.grossLineTotal }
     let couponSavings = included.reduce(0) { $0 + $1.couponSavings }
     return ShoppingPlan(
@@ -887,19 +888,6 @@ func saleTerms(for itemIDs: Set<String>) -> [String] {
     }.map(normalizedCouponText).filter { !$0.isEmpty }
 }
 
-func saleMatchScore(in text: String, itemIDs: Set<String>) -> Int {
-    guard !itemIDs.isEmpty else { return 0 }
-    let normalized = normalizedCouponText(text)
-    return saleTerms(for: itemIDs).reduce(0) { score, term in
-        score + (normalized.contains(term) ? max(2, min(8, term.count / 3)) : 0)
-    }
-}
-
-func saleRecipeScore(_ recipe: Recipe, options: ListOptions) -> Int {
-    guard options.prioritizeSales else { return 0 }
-    return saleMatchScore(in: recipe.title + " " + recipe.ingredients.joined(separator: " "), itemIDs: options.saleItemIDs)
-}
-
 func adjustedForProfile(_ recipe: Recipe, options: ListOptions) -> Recipe {
     let baseMacros = recipe.macrosPerServing
     let factor = bodySizeMultiplier(for: options)
@@ -920,9 +908,9 @@ func recipesForPlan(apiRecipes: [Recipe], days: Int, lifestyle: String, options:
     let needed = recipeCountNeeded(for: days)
     var result: [Recipe] = []
     func score(_ recipe: Recipe) -> Int {
-        // Sale weighting is deliberately strong so recipe selection steers toward the week's
-        // discounted proteins/produce, which is where the largest savings come from.
-        nutritionGoalScore(recipe, goal: options.nutritionGoal) + saleRecipeScore(recipe, options: options) * 6
+        // Ranked on the goal only. A discount must not decide what you eat this
+        // week; it gets its say later, as a substitute for something already needed.
+        nutritionGoalScore(recipe, goal: options.nutritionGoal)
     }
     let rankedAPI = apiRecipes.filter { recipeMatchesLifestyle($0, lifestyle: lifestyle) }.sorted { score($0) > score($1) }
     let rankedBuiltIns = builtInRecipes.filter { recipeMatchesLifestyle($0, lifestyle: lifestyle) }.sorted { score($0) > score($1) }
@@ -1218,12 +1206,10 @@ func makeDailyMealPlans(options: ListOptions, recipes: [Recipe], schedule: [Sche
     // Only Cutting caps individual days at 2,800; Maintenance/Build Muscle are uncapped.
     let dailyCeiling = options.nutritionGoal == .cutting ? maximumDailyCalories : Int.max
     let dailyTargets = variedDailyNutritionTargets(base: baseTarget, days: options.days, dailyCeiling: dailyCeiling)
-    let rankedBreakfasts = options.prioritizeSales && !options.saleItemIDs.isEmpty
-        ? breakfastChoices.sorted { saleMatchScore(in: $0.name, itemIDs: options.saleItemIDs) > saleMatchScore(in: $1.name, itemIDs: options.saleItemIDs) }
-        : breakfastChoices
-    let rankedLunches = options.prioritizeSales && !options.saleItemIDs.isEmpty
-        ? lunchChoices.sorted { saleMatchScore(in: $0.name, itemIDs: options.saleItemIDs) > saleMatchScore(in: $1.name, itemIDs: options.saleItemIDs) }
-        : lunchChoices
+    // Meals are picked for the target, never for what happens to be discounted --
+    // the week's offers are read afterwards, against the list these meals produce.
+    let rankedBreakfasts = breakfastChoices
+    let rankedLunches = lunchChoices
     return schedule.sorted { $0.day < $1.day }.map { entry in
         let target = dailyTargets[min(max(0, entry.day - 1), dailyTargets.count - 1)]
         let rawBreakfast = options.enabledMeals.contains("Breakfast") ? rankedBreakfasts[(entry.day - 1) % rankedBreakfasts.count] : skipped
@@ -1291,7 +1277,7 @@ final class DailyMealsPDFWriter {
         y += 34
         let target = personalizedNutritionTarget(for: options)
         let saleNote = options.prioritizeSales
-            ? " Meal order favors \(options.saleItemIDs.count) verified sale ingredient match\(options.saleItemIDs.count == 1 ? "" : "es") where compatible; the weekly average target does not change."
+            ? " Meals were planned from the target alone; the week's \(options.saleItemIDs.count) verified offer match\(options.saleItemIDs.count == 1 ? " was" : "es were") applied to the resulting list afterwards."
             : ""
         let goalNote: String
         switch options.nutritionGoal {
@@ -1377,7 +1363,7 @@ final class RecipePDFWriter {
         context = output
         beginPage(title: "\(options.days)-Day Recipe Plan", subtitle: "\(options.recipient) | \(lifestyle) | \(nutritionGoal.rawValue)")
         let saleNote = options.prioritizeSales
-            ? " Recipe order favors \(options.saleItemIDs.count) verified official sale ingredient match\(options.saleItemIDs.count == 1 ? "" : "es") when nutritionally compatible; account offers must still be clipped."
+            ? " Recipes were chosen on nutrition alone; the week's \(options.saleItemIDs.count) verified offer match\(options.saleItemIDs.count == 1 ? " was" : "es were") applied to the shopping list once it was settled. Account offers must still be clipped."
             : ""
         let introHeight = drawText("Paired shopping list: \(shoppingListFilename). One recipe is assigned to every day and adjusted for the entered height, weight and \(nutritionGoal.rawValue) goal. \(profileDescription(for: options)). The listed recipe macros are for that one meal; breakfast, lunch, dinner and snacks vary by day while each seven-day block averages to the calorie target.\(saleNote) Grocery quantities and per-person recipe portions use the calculated factor; selections favor value staples and target about $250. Calories and macros are estimates. Prep days make multiple servings; later days use the labeled saved portion. All recipe paths exclude soy, cabbage, and organic-only requirements.", x: margin, y: y, width: 528, font: .systemFont(ofSize: 8.1), color: .darkGray)
         y += introHeight + 12
@@ -1523,8 +1509,8 @@ final class PDFWriter {
         }
         if options.prioritizeSales {
             let saleNote = plan.prioritizedSaleItems > 0
-                ? "SALE-TAILORED: \(plan.prioritizedSaleItems) verified official offer match\(plan.prioritizedSaleItems == 1 ? "" : "es") influenced list and recipe priority. Regular totals, offer savings, and estimated checkout are shown below. Account offers must still be clipped."
-                : "SALE CHECKED: No verified official offer matches were usable for this list, so nutrition, budget, and value-staple choices were left unchanged."
+                ? "DEALS APPLIED: this list was built from your nutrition target at shelf prices, then \(plan.prioritizedSaleItems) verified official offer\(plan.prioritizedSaleItems == 1 ? "" : "s") landed on items it already called for. Regular totals, offer savings, and estimated checkout are shown below. Account offers must still be clipped."
+                : "DEALS CHECKED: none of this week's verified offers covered anything on this list, so nothing was substituted."
             drawSmall(saleNote)
         }
 
@@ -1620,7 +1606,7 @@ final class PDFWriter {
         let couponText = plan.couponSavings > 0
             ? "Coupons applied: -\(money(plan.couponSavings)) | Before coupons: \(money(plan.grossSubtotal))"
             : "Coupons applied: $0.00"
-        let saleText = options.prioritizeSales ? " | Sale-tailored items: \(plan.prioritizedSaleItems)" : ""
+        let saleText = options.prioritizeSales ? " | Needed items a deal covered: \(plan.prioritizedSaleItems)" : ""
         drawText("\(couponText)\(saleText) | Checked: \(retailerCount) retailer anchors, \(usdaCount) USDA foods", x: margin + 10, y: y + 86, width: 500, font: .systemFont(ofSize: 7.6), color: .darkGray)
         y += 118
     }
@@ -1755,7 +1741,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let costco = NSButton(checkboxWithTitle: "Costco", target: nil, action: nil)
     let shoprite = NSButton(checkboxWithTitle: "ShopRite", target: nil, action: nil)
     let stews = NSButton(checkboxWithTitle: "Stew Leonard's", target: nil, action: nil)
-    let prioritizeSales = NSButton(checkboxWithTitle: "Prioritize verified sales", target: nil, action: nil)
+    let prioritizeSales = NSButton(checkboxWithTitle: "Apply deals to the list", target: nil, action: nil)
     let usdaKeyField = NSTextField(string: "")
     let mealDBKeyField = NSTextField(string: "")
     let keyBenefitBanner = NSTextField(wrappingLabelWithString: "Optional paid TheMealDB supporter key: free key 1 still works. Supporter access adds V2, multi-ingredient filters, higher production access, recipe uploads, and app-store publishing rights under current terms.")
@@ -1878,7 +1864,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         view.addSubview(label("Stores", frame: NSRect(x: 30, y: 490, width: 90, height: 22)))
         for (button, x, width) in [(bjs, 130, 70), (costco, 205, 80), (shoprite, 290, 95), (stews, 390, 150)] { button.frame = NSRect(x: x, y: 487, width: width, height: 24); button.state = .on; view.addSubview(button) }
         prioritizeSales.frame = NSRect(x: 545, y: 487, width: 180, height: 24)
-        prioritizeSales.toolTip = "Refresh official offers before PDF creation, favor verified matches in the list and recipes, and keep the same weekly average nutrition target."
+        prioritizeSales.toolTip = "Meals and the shopping list are always built from your nutrition target first. With this on, the week's imported offers are then applied to that finished list and cheaper on-sale substitutes are proposed for what is on it."
         view.addSubview(prioritizeSales)
 
         let box = NSBox(frame: NSRect(x: 25, y: 225, width: 710, height: 225))
@@ -2704,7 +2690,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             printButton.isEnabled = true
             let savings = plan.couponSavings > 0 ? " Coupon savings applied: \(money(plan.couponSavings))." : ""
             let saleMessage = options.prioritizeSales
-                ? " Sale tailoring used \(plan.prioritizedSaleItems) verified included match\(plan.prioritizedSaleItems == 1 ? "" : "es")."
+                ? " Deals covered \(plan.prioritizedSaleItems) item\(plan.prioritizedSaleItems == 1 ? "" : "s") the list already needed."
                 : ""
             let extras = coverage.supplementalItemIDs.isEmpty ? "" : " Added \(coverage.supplementalItemIDs.count) explicit recipe-extra item(s)."
             let swapMessage: String
@@ -2868,6 +2854,24 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
         )
         let ingredientLineCount = saleRecipes.reduce(0) { $0 + $1.ingredients.count }
         let plannedIDs = Set(salePlan.rows.map { $0.item.id })
+        // Order of operations: the menu and the basket are settled on need, and only
+        // then are offers applied. Planning the identical week with no offers at all
+        // must therefore yield the same recipes and the same rows -- the deals may
+        // change what it costs and what can be swapped, never what it asks for.
+        let noDealOptions = ListOptions(
+            recipient: options.recipient, days: options.days, people: options.people,
+            budgetMin: options.budgetMin, budgetMax: options.budgetMax,
+            groupByStore: options.groupByStore, enabledMeals: options.enabledMeals,
+            enabledStores: options.enabledStores, nutritionGoal: options.nutritionGoal,
+            heightInches: options.heightInches, weightPounds: options.weightPounds,
+            prioritizeSales: false, saleItemIDs: []
+        )
+        let noDealRecipes = recipesForPlan(apiRecipes: [], days: noDealOptions.days, lifestyle: "Mediterranean", options: noDealOptions)
+        let noDealCoverage = recipeShoppingCoverage(recipes: noDealRecipes, options: noDealOptions)
+        let noDealPlan = makeShoppingPlan(
+            options: noDealOptions, items: noDealCoverage.items, prices: testPriceBook,
+            favorites: testFavorites, requiredItemIDs: noDealCoverage.requiredItemIDs
+        )
         let unfamiliarRecipe = Recipe(
             title: "API coverage fixture", baseServings: 1, readyMinutes: 10,
             ingredients: ["1 fennel bulb", "2 cups water"], steps: ["Cook."],
@@ -2890,11 +2894,13 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
               unfamiliarCoverage.requiredItemIDs.isSubset(of: Set(unfamiliarPlan.rows.map { $0.item.id })),
               unfamiliarPlan.rows.contains(where: { $0.item.name.contains("fennel bulb") }),
               !["cottage cheese", "yogurt", "yoplait", "peanut", "walnut"].contains(where: bannedIngredientResultText.contains),
-              saleRecipes.first.map({ saleRecipeScore($0, options: saleOptions) > 0 }) == true else {
-            throw NSError(domain: "SelfTest", code: 16, userInfo: [NSLocalizedDescriptionKey: "Recipe-first ingredient reconciliation, verified-sale list, or recipe prioritization failed."])
+              noDealRecipes.map({ $0.title }) == saleRecipes.map({ $0.title }),
+              Set(noDealPlan.rows.map({ $0.item.id })) == plannedIDs,
+              salePlan.estimatedTotal < noDealPlan.estimatedTotal else {
+            throw NSError(domain: "SelfTest", code: 16, userInfo: [NSLocalizedDescriptionKey: "Recipe-first ingredient reconciliation, deal application, or needs-before-deals ordering failed."])
         }
         fputs("RECIPE_COVERAGE_OK lines=\(ingredientLineCount) requiredItems=\(recipeCoverage.requiredItemIDs.count) extras=\(recipeCoverage.supplementalItemIDs.count) chicken=yes beef=yes\n", stderr)
-        fputs("SALE_TAILORING_OK items=\(salePlan.prioritizedSaleItems) firstRecipe=\(saleRecipes.first?.title ?? "none")\n", stderr)
+        fputs("DEALS_AFTER_LIST_OK rows=\(plannedIDs.count) identicalWithoutDeals=yes covered=\(salePlan.prioritizedSaleItems) saved=\(money(noDealPlan.estimatedTotal - salePlan.estimatedTotal))\n", stderr)
         // On-sale swap proposals must never touch a recipe-required item, a favorite, or the
         // sale item itself, must stay inside one substitution group, and must actually save money.
         let swapCandidates = proposeSaleSwaps(

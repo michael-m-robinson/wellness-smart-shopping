@@ -82,9 +82,21 @@ DEFAULTS: Dict[str, str] = {
     "scan_help_button": "How to Scan",
 
     # The wizard. {store} and {path} are filled in for the chosen store.
+    "scan_signin_title": "Sign in to {store} first",
+    "scan_signin_why": ("Digital coupons only exist inside your own account. "
+                        "Signed out, the page shows shelf prices or nothing at "
+                        "all, and a scan would come back empty or wrong - so "
+                        "this asks you to sign in before it hands over the "
+                        "instruction."),
+    "scan_signin_open": "Open {store}",
+    "scan_signin_done": "I'm signed in - continue",
+
     "scan_pick_title": "Which store shall I scan?",
-    "scan_pick_intro": ("Pick a store, sign in to it, and Claude will read this "
-                        "week's deals straight off the page."),
+    "scan_pick_intro": ("Make your shopping list in the app first, then come "
+                        "here: deals are looked up for what the list already "
+                        "asks for, not the other way round. Pick a store, sign "
+                        "in to it, and Claude reads this week's offers straight "
+                        "off the page."),
     "scan_wait_title": "Scanning {store}",
     # {submit} is the panel's own address, filled in at the time. The prompt
     # names no file and no folder, so it reads the same whether the panel was
@@ -122,11 +134,18 @@ DEFAULTS: Dict[str, str] = {
     "save_button": "Save",
 
     "scan_title": "Scanning a store for deals",
-    "scan_intro": ("Every deal comes from a store page you are signed in to - "
-                   "this app never contacts a store itself. Scanning reads the "
-                   "visible coupon list from the tab you already have open, so "
-                   "no password ever leaves the store site."),
+    "scan_intro": ("Deals come last on purpose. Your meals and your shopping "
+                   "list are built from your nutrition target at ordinary shelf "
+                   "prices, and only once that list exists are the week's offers "
+                   "looked up against it - so a coupon can lower what you pay, "
+                   "or suggest a cheaper swap for something you already wanted, "
+                   "but it never decides what goes in the basket. Every deal "
+                   "comes from a store page you are signed in to; this app never "
+                   "contacts a store itself, so no password leaves the store "
+                   "site."),
     "scan_steps": [
+        "Make this week's shopping list in the app, so the deals have "
+        "something to be matched against.",
         "Sign in to the store in Chrome.",
         "Open its digital coupon list and scroll once so every offer loads.",
         "Ask Claude, with the Claude for Chrome extension enabled: "
@@ -134,7 +153,8 @@ DEFAULTS: Dict[str, str] = {
         "Claude scrolls the whole list and sends the offers straight to this "
         "panel. If it cannot reach it, it prints them instead - paste those "
         "into the box in the Scan window.",
-        "The panel picks them up and turns them into a file you import.",
+        "The panel picks them up and turns them into a file you import. The "
+        "app then prices your list against it and offers substitutes.",
     ],
     "scan_note": ("If a page says you are signed out, sign in and open the "
                   "coupon list again - harvest.js will tell you rather than "
@@ -145,7 +165,9 @@ DEFAULTS: Dict[str, str] = {
         "Open the Wellness Smart Shopping desktop app.",
         "Choose Import Sales XML... from the menu.",
         "Pick the newest file from the out/ folder listed below.",
-        "The app re-prices your list and re-ranks recipes around the deals.",
+        "The app applies each offer to the items your list already calls for, "
+        "then proposes cheaper on-sale substitutes for the optional ones - your "
+        "recipes and your target are left exactly as they were.",
         "Store-account coupons still need clipping in your store account - "
         "the file tells the app what a deal is worth, it cannot clip it.",
     ],

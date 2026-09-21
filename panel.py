@@ -42,7 +42,13 @@ _lock = threading.Lock()
 # only shortens the deadline -- a heartbeat is what actually decides. Nothing
 # happens until the first heartbeat arrives, so a panel started by the desktop
 # app before any browser opens is left alone.
-_alive = {"last_seen": 0.0, "seen": False, "closing": False}
+_alive = {"last_seen": 0.0, "seen": False, "closing": False,
+          # A scan happens in another tab, and the user may well close this
+          # one to get at it. Shutting down mid-scan would throw the offers
+          # away when the store page posts them back, so a scan in progress
+          # holds the panel open.
+          "scanning_since": 0.0}
+SCAN_HOLD_MAX = 45 * 60.0   # a scan left open forever should not pin it
 # Filled in once the server binds, so the prompt carries the real port rather
 # than an assumed one.
 _base = {"url": "http://127.0.0.1:8765"}
@@ -62,6 +68,10 @@ def _watchdog(server, idle_timeout):
     while True:
         time.sleep(1.0)
         if not _alive["seen"]:
+            continue
+        # Hold while a scan is open, however the window behaves.
+        started = _alive["scanning_since"]
+        if started and time.monotonic() - started < SCAN_HOLD_MAX:
             continue
         grace = CLOSING_GRACE if _alive["closing"] else idle_timeout
         if time.monotonic() - _alive["last_seen"] > grace:
@@ -700,6 +710,16 @@ def page() -> str:
     </div>
   </section>
 
+  <section id="w-signin" hidden>
+    <h2 id="w-signin-title"></h2>
+    <p class="muted">{g('scan_signin_why')}</p>
+    <div id="w-signin-links"></div>
+    <div class="row" style="margin:18px 0 0">
+      <button class="primary" id="w-signin-go">{g('scan_signin_done')}</button>
+      <button id="w-signin-back">Back</button>
+    </div>
+  </section>
+
   <section id="w-wait" hidden>
     <h2 id="w-wait-title"></h2>
     <p class="muted">{g('scan_wait_body')}</p>
@@ -900,12 +920,16 @@ const wiz = $("#scanwiz");
 let wizState = {{store: null, baseline: 0, xml: "", timer: null}};
 
 function wizStep(id) {{
-  ["w-pick", "w-wait", "w-done", "w-after"].forEach(
+  ["w-pick", "w-signin", "w-wait", "w-done", "w-after"].forEach(
     s => $("#" + s).hidden = (s !== id));
 }}
 
-function wizStop() {{
+function wizStop(cancelled) {{
   if (wizState.timer) {{ clearInterval(wizState.timer); wizState.timer = null; }}
+  // Release the hold that keeps the panel alive during a scan.
+  if (cancelled && wizState.store) {{
+    wizPost("cancel", {{store: wizState.store}}).catch(() => {{}});
+  }}
 }}
 
 async function wizPost(action, body) {{
@@ -916,45 +940,44 @@ async function wizPost(action, body) {{
 }}
 
 $("#scanwith").onclick = () => {{ wizStop(); wizStep("w-pick"); wiz.showModal(); }};
-$("#w-pick-close").onclick = () => {{ wizStop(); wiz.close(); }};
-$("#w-cancel").onclick = () => {{ wizStop(); wizStep("w-pick"); }};
-$("#w-again").onclick = () => {{ wizStop(); wizStep("w-pick"); }};
-$("#w-after-close").onclick = () => {{ wizStop(); wiz.close(); location.reload(); }};
+$("#w-pick-close").onclick = () => {{ wizStop(true); wiz.close(); }};
+$("#w-cancel").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
+$("#w-again").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
+$("#w-after-close").onclick = () => {{ wizStop(true); wiz.close(); location.reload(); }};
 $("#w-help").onclick = () => {{ wiz.close(); $("#scandlg").showModal(); }};
 
 document.querySelectorAll(".picker").forEach(el => {{
   el.onclick = async () => {{
     const key = el.dataset.store;
     const d = await wizPost("start", {{store: key}});
-    wizState = {{store: key, baseline: d.baseline, xml: "", timer: null}};
-    $("#w-wait-title").textContent = {j('scan_wait_title')}.replace("{{store}}", d.name);
-    $("#w-prompt").textContent = d.prompt;
-    try {{
-      const steps = await (await fetch("/api/steps?store=" + encodeURIComponent(key))).text();
-      $("#w-steps").innerHTML = steps;
-    }} catch (e) {{ $("#w-steps").innerHTML = ""; }}
-    $("#w-links").innerHTML = (d.urls || []).map(
+    wizState = {{store: key, baseline: d.baseline, xml: "", timer: null, started: d}};
+    const links = (d.urls || []).map(
       u => '<p><a href="' + esc(u.url) + '" target="_blank" rel="noopener">' +
            esc(u.label) + '</a></p>').join("");
-    $("#w-status").innerHTML = '<span class="spin"></span>' + esc({j('scan_waiting')});
-    wizStep("w-wait");
-    wizState.timer = setInterval(wizPoll, 2500);
+    $("#w-signin-title").textContent = {j('scan_signin_title')}.replace("{{store}}", d.name);
+    $("#w-signin-links").innerHTML = links;
+    $("#w-links").innerHTML = links;
+    wizStep("w-signin");
   }};
 }});
 
-$("#w-paste-go").onclick = async () => {{
-  const text = $("#w-paste").value.trim();
-  if (!text) return;
-  const r = await fetch("/api/scan/submit?store=" + encodeURIComponent(wizState.store),
-                        {{method: "POST", headers: {{"Content-Type": "text/plain"}},
-                          body: text}});
-  if (r.ok) {{
-    $("#w-paste").value = "";
-    $("#w-status").innerHTML = '<span class="spin"></span>' + esc("Reading what you pasted...");
-    wizPoll();
-  }} else {{
-    $("#w-status").textContent = "That did not look like a scan.";
-  }}
+$("#w-signin-back").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
+
+// Only once they say they are signed in does the instruction appear: a scan of
+// a signed-out page comes back empty or wrong.
+$("#w-signin-go").onclick = async () => {{
+  const d = wizState.started;
+  if (!d) return;
+  $("#w-wait-title").textContent = {j('scan_wait_title')}.replace("{{store}}", d.name);
+  $("#w-prompt").textContent = d.prompt;
+  try {{
+    const steps = await (await fetch("/api/steps?store=" +
+                    encodeURIComponent(wizState.store))).text();
+    $("#w-steps").innerHTML = steps;
+  }} catch (e) {{ $("#w-steps").innerHTML = ""; }}
+  $("#w-status").innerHTML = '<span class="spin"></span>' + esc({j('scan_waiting')});
+  wizStep("w-wait");
+  wizState.timer = setInterval(wizPoll, 2500);
 }};
 
 $("#w-copy").onclick = async () => {{
@@ -1303,6 +1326,7 @@ class Handler(BaseHTTPRequestHandler):
                 # for the one the user is about to run.
                 baseline = (os.path.getmtime(store.harvest_path)
                             if store.scanned else 0)
+                _alive["scanning_since"] = time.monotonic()
                 submit = f"{_base['url']}/api/scan/submit?store={store.key}"
                 script = f"{_base['url']}/harvest.js"
                 prompt = str(brand.get("scan_prompt", "")).format(
@@ -1328,12 +1352,18 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(200, json.dumps({"ready": False}),
                                       "application/json")
                 result = build_for(store)
+                _alive["scanning_since"] = 0.0     # the scan landed
                 return self._send(200, json.dumps({
                     "ready": True, "name": store.name,
                     "count": result.get("count", 0),
                     "xml": result.get("xml", ""),
                     "error": result.get("error", ""),
                 }), "application/json")
+
+            if action == "cancel":
+                _alive["scanning_since"] = 0.0
+                return self._send(200, json.dumps({"cancelled": True}),
+                                  "application/json")
 
             if action == "import":
                 xml = str(body.get("xml") or "")

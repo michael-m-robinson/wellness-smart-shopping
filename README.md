@@ -7,14 +7,16 @@
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
 [![Mobile](https://img.shields.io/badge/mobile-coming%20soon-orange)](#whats-next)
 
-**Turn this week's grocery sales into a shopping list that still hits your
-nutrition targets.**
+**Build the shopping list your nutrition targets call for — then let this
+week's grocery sales pay for it.**
 
-Wellness Smart Shopping reads the weekly deals, digital coupons and instant
-savings from the store pages **you** are signed in to, matches them to the
-staples on your list, and writes a small XML file. You import that file into the
-[companion desktop app](#the-companion-desktop-app) and it re-prices your
-list, re-ranks your recipes, and tells you what the trip should actually cost.
+The [companion desktop app](#the-companion-desktop-app) plans your meals and
+your list from your calorie and macro targets at ordinary shelf prices. Only
+once that list exists does Wellness Smart Shopping go looking: it reads the
+weekly deals, digital coupons and instant savings from the store pages **you**
+are signed in to, matches them against what the list already asks for, and
+writes a small XML file. Import it and the app prices your trip against those
+offers and proposes cheaper on-sale substitutes for the optional items.
 
 > **Free and open source.** Bring your own stores and your own accounts.
 > Nothing here is tied to one household, one store or one region.
@@ -67,6 +69,13 @@ This tool closes that gap.
 - **It protects the nutrition targets.** The XML only adjusts *prices and
   limits*. The app still plans to your calorie and macro goals; a deal can
   change which protein you buy, not whether you hit your protein.
+- **It looks for deals last, on purpose.** Your recipes and your list are
+  settled before a single offer is read, so what goes in the basket is decided
+  by what you need. A deal then lowers what you pay for those items, or offers
+  a swap inside the same role — turkey for beef, quinoa for rice — that you
+  approve item by item. Plan the week around the circular instead and you end
+  up eating the circular. Build the list with the deals turned off and turned
+  on and you get the same list; only the price changes.
 - **It respects purchase limits.** "Limit 4" is carried into the file, so the
   savings you are shown are savings you can really get at the register.
 - **It is honest about what a deal is worth.** A `$3.99/lb` advertisement is
