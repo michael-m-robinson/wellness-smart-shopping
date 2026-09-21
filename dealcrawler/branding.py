@@ -86,12 +86,14 @@ DEFAULTS: Dict[str, str] = {
     "scan_pick_intro": ("Pick a store, sign in to it, and Claude will read this "
                         "week's deals straight off the page."),
     "scan_wait_title": "Scanning {store}",
-    "scan_prompt": ("Scan this page for deals with browser/harvest.js and save "
-                    "the result to {path}"),
+    "scan_prompt": ("Run browser/harvest.js on this page to scan it for deals. "
+                    "It sends the result to my control panel on its own."),
     "scan_wait_body": ("Open the store below and sign in, then give Claude this "
-                       "instruction in the Chrome side panel. I'll watch for the "
-                       "result and pick it up automatically."),
+                       "instruction. The scan comes straight back here - there "
+                       "is no file to save."),
     "scan_waiting": "Waiting for the scan to finish...",
+    "scan_paste_label": "Claude printed the offers instead? Paste them here",
+    "scan_paste_button": "Use these offers",
     "scan_done_title": "{store}: {count} deals found",
     "scan_done_body": "Your sales file is ready. Import it now?",
     "scan_none_title": "{store}: nothing matched",
@@ -122,9 +124,10 @@ DEFAULTS: Dict[str, str] = {
         "offer loads.",
         "Ask Claude, with the Claude for Chrome extension enabled: "
         "\"run browser/harvest.js on this tab\".",
-        "Claude scrolls the whole list and prints one offer per line. Save that "
-        "as harvest/<store>.txt - the exact path is shown per store below.",
-        "Press Refresh Deals. The scan is turned into XML you import.",
+        "Claude scrolls the whole list and sends the offers straight to this "
+        "panel. If it cannot reach it, it prints them instead - paste those "
+        "into the box in the Scan window.",
+        "The panel picks them up and turns them into a file you import.",
     ],
     "scan_note": ("If a page says you are signed out, sign in and open the "
                   "coupon list again - harvest.js will tell you rather than "
@@ -232,13 +235,23 @@ def themes() -> List[dict]:
                 continue
             seen.add(stem)
             thumb = os.path.join(folder, "thumbs", f"{stem}.jpg")
+            # THEMES.json entries are {description, focus}; older files held
+            # just the description string, so accept both.
+            entry = described.get(stem)
+            if isinstance(entry, dict):
+                description = entry.get("description", "Your own image")
+                focus = entry.get("focus", 50)
+            else:
+                description = entry or "Your own image"
+                focus = 50
             out.append({
                 "name": stem,
                 "file": fname,
                 "thumb": f"thumbs/{stem}.jpg" if os.path.isfile(thumb) else fname,
                 "dir": folder,
                 "mine": is_users,
-                "description": described.get(stem, "Your own image"),
+                "description": description,
+                "focus": focus,
                 "bundled": stem in described and not is_users,
             })
     return sorted(out, key=lambda t: t["name"])

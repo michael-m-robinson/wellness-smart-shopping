@@ -76,6 +76,12 @@ class Profile:
     age: Optional[int] = None
     sex: str = DEFAULT_SEX
     activity: str = DEFAULT_ACTIVITY
+    # Set any of these to override what the formula works out. Blank means
+    # "use the calculated figure", so you can pin protein and leave the rest.
+    custom_calories: Optional[int] = None
+    custom_protein: Optional[int] = None
+    custom_carbs: Optional[int] = None
+    custom_fat: Optional[int] = None
     people: int = 1
     days: int = 7
     budget_min: float = 0.0
@@ -123,7 +129,7 @@ def target(profile: Profile) -> dict:
 
     if not profile.complete:
         p, c, f = FALLBACK["protein"], FALLBACK["carbs"], FALLBACK["fat"]
-        return {
+        return _apply_overrides(profile, {
             "calories": calories(p, c, f), "protein": p, "carbs": c, "fat": f,
             "maintenance": FALLBACK["maintenance"],
             "multiplier": FALLBACK["multiplier"],
@@ -133,7 +139,7 @@ def target(profile: Profile) -> dict:
             "sex_label": SEXES[profile.sex][0],
             "activity_label": ACTIVITY[profile.activity][0],
             "personalised": False,
-        }
+        })
 
     _, multiplier, protein_per_lb, fat_per_lb = GOALS[profile.goal]
 
@@ -166,7 +172,7 @@ def target(profile: Profile) -> dict:
         fat = max(fat, int(round(desired * MIN_FAT_CALORIE_SHARE / 9.0)))
     carbs = max(100, int(round((desired - (protein * 4 + fat * 9)) / 4.0)))
 
-    return {
+    return _apply_overrides(profile, {
         "calories": calories(protein, carbs, fat),
         "protein": protein, "carbs": carbs, "fat": fat,
         "maintenance": maintenance, "multiplier": multiplier,
@@ -176,7 +182,30 @@ def target(profile: Profile) -> dict:
         "sex_label": SEXES[profile.sex][0],
         "activity_label": ACTIVITY[profile.activity][0],
         "personalised": profile.personalised,
+    })
+
+
+def _apply_overrides(profile: Profile, computed: dict) -> dict:
+    """Your own numbers win. Calories are recomputed from the macros unless you
+    set a calorie figure too, so the four never contradict each other."""
+    overrides = {
+        "protein": profile.custom_protein,
+        "carbs": profile.custom_carbs,
+        "fat": profile.custom_fat,
     }
+    used = {k: v for k, v in overrides.items() if v is not None and v >= 0}
+    if used:
+        computed.update(used)
+        computed["calories"] = calories(computed["protein"], computed["carbs"],
+                                        computed["fat"])
+    if profile.custom_calories is not None and profile.custom_calories > 0:
+        computed["calories"] = profile.custom_calories
+        used["calories"] = profile.custom_calories
+    computed["custom_fields"] = sorted(used)
+    computed["custom"] = bool(used)
+    if used:
+        computed["basis"] = "yours"
+    return computed
 
 
 def portion_multiplier(profile: Profile) -> float:

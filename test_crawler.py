@@ -244,14 +244,18 @@ class TestNoNetworkAccess(unittest.TestCase):
         for sub in ("dealcrawler", os.path.join("dealcrawler", "sources")):
             d = os.path.join(root, sub)
             files += [os.path.join(d, f) for f in os.listdir(d) if f.endswith(".py")]
-        banned = ("import urllib", "from urllib", "import requests",
-                  "import http.client", "urlopen")
+        # Ban what can open a connection, not the whole urllib package:
+        # urllib.parse only splits strings and is used to read a query string.
+        banned = ("urllib.request", "from urllib import request", "urlopen",
+                  "import requests", "http.client", "socket.create_connection")
         for path in files:
             with open(path, encoding="utf-8") as fh:
                 body = fh.read()
             for needle in banned:
                 self.assertNotIn(needle, body,
                                  msg=f"{os.path.basename(path)} still fetches ({needle})")
+            # A bare `import urllib` would put request within reach.
+            self.assertNotIn("\nimport urllib\n", body, os.path.basename(path))
 
     def test_stores_are_config_driven(self):
         from dealcrawler import stores
@@ -875,6 +879,64 @@ class TestBundledLayout(unittest.TestCase):
             build = fh.read()
         for shipped in ("panel.py", "crawl.py", "dealcrawler", "themes", "browser"):
             self.assertIn(shipped, build, shipped)
+
+
+class TestScanDelivery(unittest.TestCase):
+    """A browser extension cannot write to disk. The scan runs inside the
+    store's page and posts itself back, so the panel has to accept that."""
+
+    def setUp(self):
+        import panel
+        self.panel = panel
+        self.html = panel.page()
+        root = os.path.dirname(os.path.abspath(__file__))
+        with open(os.path.join(root, "browser", "harvest.js"), encoding="utf-8") as fh:
+            self.js = fh.read()
+        from dealcrawler import branding
+        self.brand = branding.load()
+
+    def test_nothing_asks_the_extension_to_write_a_file(self):
+        self.assertNotIn("save the result to", self.brand["scan_prompt"])
+        for step in self.brand["scan_steps"]:
+            self.assertNotIn("harvest/<store>.txt", step)
+
+    def test_harvest_posts_its_result(self):
+        self.assertIn("/api/scan/submit", self.js)
+        self.assertIn("method: \"POST\"", self.js)
+
+    def test_harvest_falls_back_to_printing(self):
+        """If the panel is not running, the offers must not be lost."""
+        self.assertIn("Could not reach the control panel", self.js)
+
+    def test_panel_answers_the_cross_origin_preflight(self):
+        """Chrome preflights a public page reaching a local address."""
+        self.assertTrue(hasattr(self.panel.Handler, "do_OPTIONS"),
+                        "the handler must answer a preflight")
+        source = open(self.panel.__file__, encoding="utf-8").read()
+        for header in ("Access-Control-Allow-Origin",
+                       "Access-Control-Allow-Private-Network",
+                       "Access-Control-Allow-Methods"):
+            self.assertIn(header, source, header)
+
+    def test_submit_saves_a_scan(self):
+        import json as _json
+        import tempfile as _tempfile
+        from dealcrawler import stores
+        store = stores.get("shoprite", self.panel.load_config())
+        created = not os.path.exists(store.harvest_path)
+        try:
+            os.makedirs(os.path.dirname(store.harvest_path), exist_ok=True)
+            with open(store.harvest_path, "w", encoding="utf-8") as fh:
+                fh.write("93% Lean Ground Turkey | $3.49 |\n")
+            result = self.panel.build_for(store)
+            self.assertTrue(result["found"])
+        finally:
+            if created and os.path.exists(store.harvest_path):
+                os.remove(store.harvest_path)
+
+    def test_paste_box_exists_as_a_fallback(self):
+        self.assertIn('id="w-paste"', self.html)
+        self.assertIn('id="w-paste-go"', self.html)
 
 
 if __name__ == "__main__":

@@ -1,28 +1,106 @@
 {
-  "50s-1": "Retro 1950s grocery shopping",
-  "50s-2": "Retro 1950s grocery shopping",
-  "50s-3": "Retro 1950s grocery shopping",
-  "50s-4": "Retro 1950s grocery shopping",
-  "50s-5": "Retro 1950s grocery shopping",
-  "50s-6": "Retro 1950s grocery shopping",
-  "50s-7": "Retro 1950s grocery shopping",
-  "berry": "Deep berry tones",
-  "citrus": "Bright citrus slice",
-  "family": "Family at the table",
-  "farm-market": "Warm market stall with tomato and citrus",
-  "fit-1": "Training and strength",
-  "fit-2": "Training and strength",
-  "fit-3": "Training and strength",
-  "fit-4": "Training and strength",
-  "fit-5": "Training and strength",
-  "fit-6": "Training and strength",
-  "fit-7": "Training and strength",
-  "fit-8": "Training and strength",
-  "fresh-greens": "Leafy greens on a soft light wash",
-  "harvest": "Autumn squash and earth tones",
-  "nature-1": "Open air and green space",
-  "nature-2": "Open air and green space",
-  "nature-3": "Open air and green space",
-  "nature-4": "Open air and green space",
-  "ocean-calm": "Cool blues, calm and clean"
+  "50s-1": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 46.5
+  },
+  "50s-2": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 55.8
+  },
+  "50s-3": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 54.6
+  },
+  "50s-4": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 49.7
+  },
+  "50s-5": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 46.5
+  },
+  "50s-6": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 54.7
+  },
+  "50s-7": {
+    "description": "Retro 1950s grocery shopping",
+    "focus": 47.6
+  },
+  "berry": {
+    "description": "Deep berry tones",
+    "focus": 49.4
+  },
+  "citrus": {
+    "description": "Bright citrus slice",
+    "focus": 48.5
+  },
+  "family": {
+    "description": "Family at the table",
+    "focus": 49.5
+  },
+  "farm-market": {
+    "description": "Warm market stall with tomato and citrus",
+    "focus": 48.1
+  },
+  "fit-1": {
+    "description": "Training and strength",
+    "focus": 44.1
+  },
+  "fit-2": {
+    "description": "Training and strength",
+    "focus": 60.3
+  },
+  "fit-3": {
+    "description": "Training and strength",
+    "focus": 42.8
+  },
+  "fit-4": {
+    "description": "Training and strength",
+    "focus": 42.4
+  },
+  "fit-5": {
+    "description": "Training and strength",
+    "focus": 54.9
+  },
+  "fit-6": {
+    "description": "Training and strength",
+    "focus": 47.3
+  },
+  "fit-7": {
+    "description": "Training and strength",
+    "focus": 47.5
+  },
+  "fit-8": {
+    "description": "Training and strength",
+    "focus": 43.3
+  },
+  "fresh-greens": {
+    "description": "Leafy greens on a soft light wash",
+    "focus": 50.6
+  },
+  "harvest": {
+    "description": "Autumn squash and earth tones",
+    "focus": 47.4
+  },
+  "nature-1": {
+    "description": "Open air and green space",
+    "focus": 39.5
+  },
+  "nature-2": {
+    "description": "Open air and green space",
+    "focus": 46.8
+  },
+  "nature-3": {
+    "description": "Open air and green space",
+    "focus": 65.4
+  },
+  "nature-4": {
+    "description": "Open air and green space",
+    "focus": 62.7
+  },
+  "ocean-calm": {
+    "description": "Cool blues, calm and clean",
+    "focus": 49.8
+  }
 }

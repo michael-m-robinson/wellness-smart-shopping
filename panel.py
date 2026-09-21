@@ -20,6 +20,7 @@ import plistlib
 import subprocess
 import sys
 import threading
+import time
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
@@ -35,6 +36,39 @@ paths.ensure_data_dir()
 
 _state = {"running": False, "last": None}
 _lock = threading.Lock()
+
+# The panel should not outlive the window it serves. A page can send a beacon
+# as it unloads, but that fires on reload and navigation too, so the beacon
+# only shortens the deadline -- a heartbeat is what actually decides. Nothing
+# happens until the first heartbeat arrives, so a panel started by the desktop
+# app before any browser opens is left alone.
+_alive = {"last_seen": 0.0, "seen": False, "closing": False}
+IDLE_GRACE = 12.0      # no heartbeat for this long -> the window is gone
+CLOSING_GRACE = 4.0    # after a close beacon, this long for a reload to return
+
+
+def _touch(closing=False):
+    _alive["last_seen"] = time.monotonic()
+    _alive["seen"] = True
+    _alive["closing"] = closing
+
+
+def _watchdog(server, idle_timeout):
+    if idle_timeout <= 0:
+        return
+    while True:
+        time.sleep(1.0)
+        if not _alive["seen"]:
+            continue
+        grace = CLOSING_GRACE if _alive["closing"] else idle_timeout
+        if time.monotonic() - _alive["last_seen"] > grace:
+            reason = "window closed" if _alive["closing"] else "no browser for a while"
+            print(f"\nStopping: {reason}.")
+            try:
+                server.shutdown()
+            except Exception:
+                pass
+            os._exit(0)
 
 
 def load_config() -> dict:
@@ -184,6 +218,76 @@ def scan_help() -> list:
     return out
 
 
+
+# ---------------------------------------------------------------- how to scan
+# A page cannot open a browser extension or type into it -- extensions are
+# isolated from page scripts and expose no API for it. So the steps are drawn
+# instead, because "ask Claude to run the script" means nothing to someone who
+# has never opened the side panel.
+STEP_ART = {
+    "store": """
+<svg viewBox="0 0 170 116" role="img" aria-label="A browser window showing a store page with a sign-in button">
+  <rect x="4" y="8" width="162" height="100" rx="8" fill="var(--card)" stroke="var(--line)" stroke-width="2"/>
+  <path d="M4 26h162" stroke="var(--line)" stroke-width="2" fill="none"/>
+  <circle cx="16" cy="17" r="3" fill="var(--line)"/><circle cx="26" cy="17" r="3" fill="var(--line)"/>
+  <circle cx="36" cy="17" r="3" fill="var(--line)"/>
+  <rect x="48" y="12" width="110" height="10" rx="5" fill="var(--bg)"/>
+  <rect x="18" y="38" width="64" height="8" rx="4" fill="var(--line)"/>
+  <rect x="18" y="54" width="92" height="6" rx="3" fill="var(--bg)"/>
+  <rect x="18" y="66" width="76" height="6" rx="3" fill="var(--bg)"/>
+  <rect x="18" y="84" width="62" height="16" rx="8" fill="var(--accent)"/>
+  <text x="49" y="95" text-anchor="middle" font-size="9" font-weight="700"
+        fill="var(--accent-ink)" font-family="sans-serif">Sign in</text>
+</svg>""",
+    "icon": """
+<svg viewBox="0 0 170 116" role="img" aria-label="Clicking the Claude icon in the browser toolbar opens a panel at the side">
+  <rect x="4" y="8" width="162" height="100" rx="8" fill="var(--card)" stroke="var(--line)" stroke-width="2"/>
+  <path d="M4 26h162" stroke="var(--line)" stroke-width="2" fill="none"/>
+  <rect x="14" y="12" width="96" height="10" rx="5" fill="var(--bg)"/>
+  <circle cx="132" cy="17" r="9" fill="var(--accent)"/>
+  <path d="M128 17h8M132 13v8" stroke="var(--accent-ink)" stroke-width="2" stroke-linecap="round"/>
+  <circle cx="132" cy="17" r="13" fill="none" stroke="var(--accent)" stroke-width="2" opacity="0.45"/>
+  <rect x="112" y="32" width="50" height="72" rx="6" fill="var(--bg)" stroke="var(--accent)" stroke-width="2"/>
+  <rect x="120" y="42" width="34" height="5" rx="2.5" fill="var(--line)"/>
+  <rect x="120" y="52" width="26" height="5" rx="2.5" fill="var(--line)"/>
+  <path d="M138 26l-4 8h8z" fill="var(--accent)"/>
+  <path d="M142 24l9 9-4 1-1 4z" fill="var(--ink)"/>
+</svg>""",
+    "paste": """
+<svg viewBox="0 0 170 116" role="img" aria-label="Pasting the instruction into the panel and pressing return">
+  <rect x="26" y="8" width="118" height="100" rx="8" fill="var(--card)" stroke="var(--line)" stroke-width="2"/>
+  <rect x="38" y="22" width="56" height="6" rx="3" fill="var(--line)"/>
+  <rect x="38" y="40" width="94" height="40" rx="6" fill="var(--bg)" stroke="var(--accent)" stroke-width="2"/>
+  <rect x="46" y="49" width="70" height="5" rx="2.5" fill="var(--line)"/>
+  <rect x="46" y="59" width="58" height="5" rx="2.5" fill="var(--line)"/>
+  <rect x="46" y="69" width="40" height="5" rx="2.5" fill="var(--line)"/>
+  <circle cx="122" cy="90" r="11" fill="var(--accent)"/>
+  <path d="M117 90l4 4 7-8" stroke="var(--accent-ink)" stroke-width="2.5"
+        fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>""",
+}
+
+
+def how_to_steps(store_name: str) -> str:
+    steps = [
+        ("store", "Open the store",
+         f"Click the link above. Sign in to {store_name} the way you normally would."),
+        ("icon", "Open Claude",
+         "Click the Claude button in your browser's toolbar, at the top right. "
+         "A panel slides in from the side."),
+        ("paste", "Paste and press return",
+         "Press Copy below, paste it into that panel, and press return. "
+         "Claude reads the page and saves the deals."),
+    ]
+    out = []
+    for index, (art, title, body) in enumerate(steps, start=1):
+        out.append(
+            f'<li class="howto"><div class="art">{STEP_ART[art]}</div>'
+            f'<div class="howtext"><b>{index}. {html.escape(title)}</b>'
+            f'<span>{html.escape(body)}</span></div></li>')
+    return "".join(out)
+
+
 # ------------------------------------------------------------------ page
 def page() -> str:
     brand = branding.load()
@@ -194,7 +298,9 @@ def page() -> str:
     j = lambda k: json.dumps(str(brand.get(k, "")))
     theme = brand.get("theme") or "50s-1"
     theme_files = {t["name"]: t["file"] for t in branding.themes()}
+    theme_focus = {t["name"]: t["focus"] for t in branding.themes()}
     banner_file = theme_files.get(theme) or next(iter(theme_files.values()), "")
+    banner_focus = theme_focus.get(theme, 50)
     steps = brand.get("import_steps") or []
     steps_html = "".join(f"<li>{html.escape(str(s))}</li>" for s in steps)
     prof = profile_mod.load()
@@ -240,7 +346,7 @@ def page() -> str:
     themes_html = "".join(
         f'<button class="theme{" on" if t["name"] == theme else ""}" '
         f'data-theme="{html.escape(t["name"])}" data-file="{html.escape(t["file"])}" '
-        f'title="{html.escape(t["description"])}">'
+        f'data-focus="{t["focus"]}" title="{html.escape(t["description"])}">'
         f'<img src="/themes/{html.escape(t["thumb"])}" loading="lazy" '
         f'alt="{html.escape(t["name"])}">'
         f'<span>{html.escape(t["name"].replace("-", " "))}</span></button>'
@@ -327,6 +433,21 @@ def page() -> str:
   .picker b{{display:block;font-size:1rem}}
   .picker span{{display:block;font-size:.78rem;color:var(--muted);font-weight:500;
     text-transform:uppercase;letter-spacing:.04em;margin-top:2px}}
+  .howsteps{{list-style:none;margin:16px 0 4px;padding:0;
+    display:grid;grid-template-columns:repeat(3,1fr);gap:12px}}
+  .howto{{background:var(--bg);border-radius:10px;padding:10px 10px 12px;
+    display:flex;flex-direction:column;gap:8px}}
+  .howto .art{{background:var(--card);border-radius:8px;padding:4px}}
+  .howto svg{{display:block;width:100%;height:auto}}
+  .howtext b{{display:block;font-size:.88rem;margin-bottom:3px}}
+  .howtext span{{display:block;font-size:.8rem;color:var(--muted);line-height:1.45}}
+  @media (max-width:560px){{ .howsteps{{grid-template-columns:1fr}} }}
+  .pastefall{{margin-top:12px}}
+  .pastefall summary{{font-size:.85rem;color:var(--muted);cursor:pointer}}
+  .pastefall textarea{{width:100%;margin-top:8px;font-family:ui-monospace,
+    SFMono-Regular,Menlo,monospace;font-size:12.5px;padding:9px 11px;
+    border-radius:9px;border:1px solid var(--line);background:var(--bg);
+    color:var(--ink);resize:vertical}}
   .promptbox{{display:flex;gap:8px;align-items:flex-start;background:var(--bg);
     border-radius:10px;padding:10px 12px;margin-top:4px}}
   .promptbox code{{flex:1;font-size:.83rem;word-break:break-word;line-height:1.45}}
@@ -340,6 +461,17 @@ def page() -> str:
   .targets .t{{flex:1 1 92px;background:var(--bg);border-radius:10px;
     padding:10px 12px;min-width:92px}}
   .targets .t b{{display:block;font-size:1.28rem;line-height:1.2}}
+  .targets .t input{{display:block;width:100%;font:inherit;font-size:1.28rem;
+    font-weight:700;line-height:1.2;padding:0;border:0;background:none;
+    color:var(--ink);border-bottom:1.5px dashed transparent;
+    -moz-appearance:textfield}}
+  .targets .t input::-webkit-outer-spin-button,
+  .targets .t input::-webkit-inner-spin-button{{-webkit-appearance:none;margin:0}}
+  .targets .t input:hover{{border-bottom-color:var(--line)}}
+  .targets .t input:focus{{outline:none;border-bottom-color:var(--accent)}}
+  .targets .t.mine{{box-shadow:inset 0 0 0 1.5px var(--accent)}}
+  .linkish{{font:inherit;font-size:.85rem;color:var(--accent);background:none;
+    border:0;padding:0;margin-top:10px;cursor:pointer;text-decoration:underline}}
   .targets .t span{{font-size:.76rem;color:var(--muted);text-transform:uppercase;
     letter-spacing:.05em}}
   .grid2{{display:grid;grid-template-columns:1fr 1fr;gap:0 16px}}
@@ -372,7 +504,8 @@ def page() -> str:
 </style></head><body><div class="wrap">
 
 <header>
-  <img id="banner" src="/themes/{html.escape(banner_file)}" alt="">
+  <img id="banner" src="/themes/{html.escape(banner_file)}" alt=""
+       style="object-position: center {banner_focus}%">
   <div class="veil"></div>
   <div class="txt">
     <h1 id="h-app">{g('app_name')}</h1>
@@ -403,12 +536,21 @@ def page() -> str:
     <button id="editprofile" style="padding:6px 12px;font-size:.85rem">{g('profile_edit_button')}</button>
   </div>
   <div id="targets" class="targets">
-    <div class="t"><b id="t-cal">{tgt['calories']}</b><span>kcal / day</span></div>
-    <div class="t"><b id="t-pro">{tgt['protein']}g</b><span>protein</span></div>
-    <div class="t"><b id="t-car">{tgt['carbs']}g</b><span>carbs</span></div>
-    <div class="t"><b id="t-fat">{tgt['fat']}g</b><span>fat</span></div>
+    <div class="t{' mine' if 'calories' in tgt.get('custom_fields', []) else ''}">
+      <input type="number" id="t-cal" min="800" max="8000" value="{tgt['calories']}"
+             aria-label="Calories per day"><span>kcal / day</span></div>
+    <div class="t{' mine' if 'protein' in tgt.get('custom_fields', []) else ''}">
+      <input type="number" id="t-pro" min="0" max="500" value="{tgt['protein']}"
+             aria-label="Protein grams"><span>protein</span></div>
+    <div class="t{' mine' if 'carbs' in tgt.get('custom_fields', []) else ''}">
+      <input type="number" id="t-car" min="0" max="900" value="{tgt['carbs']}"
+             aria-label="Carbohydrate grams"><span>carbs</span></div>
+    <div class="t{' mine' if 'fat' in tgt.get('custom_fields', []) else ''}">
+      <input type="number" id="t-fat" min="0" max="400" value="{tgt['fat']}"
+             aria-label="Fat grams"><span>fat</span></div>
     <div class="t"><b id="t-goal">{html.escape(tgt['goal_label'])}</b><span>goal</span></div>
   </div>
+  <button id="t-reset" class="linkish"{'' if tgt.get('custom') else ' hidden'}>Back to the calculated figures</button>
   <p class="muted" id="t-note" style="margin:10px 0 0">{g('targets_note')}</p>
 </div>
 
@@ -548,9 +690,19 @@ def page() -> str:
     <h2 id="w-wait-title"></h2>
     <p class="muted">{g('scan_wait_body')}</p>
     <div id="w-links"></div>
-    <label style="margin-top:14px">Give Claude this instruction</label>
+    <ol class="howsteps" id="w-steps"></ol>
+    <label>Give Claude this instruction</label>
     <div class="promptbox"><code id="w-prompt"></code>
       <button id="w-copy" style="padding:6px 12px;font-size:.82rem">Copy</button></div>
+    <details class="pastefall">
+      <summary>{g('scan_paste_label')}</summary>
+      <textarea id="w-paste" rows="5" spellcheck="false"
+                placeholder="Boneless Skinless Chicken Breast | $1.99/lb | Limit 4"></textarea>
+      <div class="row" style="margin:8px 0 0">
+        <button id="w-paste-go">{g('scan_paste_button')}</button>
+      </div>
+    </details>
+
     <p class="muted" id="w-ext" hidden style="margin:12px 0 0">
       Need the extension?
       <a href="{g('extension_url')}" target="_blank" rel="noopener">Install Claude for Chrome</a>
@@ -636,10 +788,16 @@ async function postProfile(preview) {{
 }}
 
 function paint(t, scope) {{
-  $(scope + "cal").textContent = t.calories;
-  $(scope + "pro").textContent = t.protein + "g";
-  $(scope + "car").textContent = t.carbs + "g";
-  $(scope + "fat").textContent = t.fat + "g";
+  const suffix = scope === "#t-" ? "" : "g";   // the tiles are number inputs
+  const set = (sel, value) => {{
+    const el = $(sel);
+    if (!el) return;
+    if (el.tagName === "INPUT") el.value = value; else el.textContent = value + suffix;
+  }};
+  set(scope + "cal", t.calories);
+  set(scope + "pro", t.protein);
+  set(scope + "car", t.carbs);
+  set(scope + "fat", t.fat);
 }}
 
 let previewTimer = null;
@@ -670,6 +828,15 @@ $("#saveprofile").onclick = async () => {{
 }};
 
 if ({first_run_js}) profDlg.showModal();
+
+// ---- keep-alive ------------------------------------------------------------
+// The panel stops once this page goes away, so closing the tab does not leave
+// a server running in the background.
+setInterval(() => {{ fetch("/api/ping").catch(() => {{}}); }}, 4000);
+fetch("/api/ping").catch(() => {{}});
+addEventListener("pagehide", () => {{
+  try {{ navigator.sendBeacon("/api/bye"); }} catch (e) {{}}
+}});
 
 // ---- Claude for Chrome notice --------------------------------------------
 // A page cannot reliably detect an installed extension: the resources this one
@@ -748,6 +915,10 @@ document.querySelectorAll(".picker").forEach(el => {{
     wizState = {{store: key, baseline: d.baseline, xml: "", timer: null}};
     $("#w-wait-title").textContent = {j('scan_wait_title')}.replace("{{store}}", d.name);
     $("#w-prompt").textContent = d.prompt;
+    try {{
+      const steps = await (await fetch("/api/steps?store=" + encodeURIComponent(key))).text();
+      $("#w-steps").innerHTML = steps;
+    }} catch (e) {{ $("#w-steps").innerHTML = ""; }}
     $("#w-links").innerHTML = (d.urls || []).map(
       u => '<p><a href="' + esc(u.url) + '" target="_blank" rel="noopener">' +
            esc(u.label) + '</a></p>').join("");
@@ -756,6 +927,21 @@ document.querySelectorAll(".picker").forEach(el => {{
     wizState.timer = setInterval(wizPoll, 2500);
   }};
 }});
+
+$("#w-paste-go").onclick = async () => {{
+  const text = $("#w-paste").value.trim();
+  if (!text) return;
+  const r = await fetch("/api/scan/submit?store=" + encodeURIComponent(wizState.store),
+                        {{method: "POST", headers: {{"Content-Type": "text/plain"}},
+                          body: text}});
+  if (r.ok) {{
+    $("#w-paste").value = "";
+    $("#w-status").innerHTML = '<span class="spin"></span>' + esc("Reading what you pasted...");
+    wizPoll();
+  }} else {{
+    $("#w-status").textContent = "That did not look like a scan.";
+  }}
+}};
 
 $("#w-copy").onclick = async () => {{
   try {{
@@ -867,11 +1053,50 @@ function render(d) {{
   $("#results").innerHTML = h || '<div class="card"><p class="muted">Nothing found.</p></div>';
 }}
 
+// The tiles are the quickest way to pin a number, so they save on their own.
+const TILES = {{"#t-cal": "custom_calories", "#t-pro": "custom_protein",
+                "#t-car": "custom_carbs", "#t-fat": "custom_fat"}};
+
+async function saveTiles() {{
+  const body = {{}};
+  for (const [sel, field] of Object.entries(TILES)) {{
+    const raw = $(sel).value.trim();
+    body[field] = raw === "" ? null : Number(raw);
+  }}
+  const r = await fetch("/api/profile", {{
+    method: "POST", headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify(body)}});
+  const d = await r.json();
+  const mine = d.target.custom_fields || [];
+  const map = {{"#t-cal": "calories", "#t-pro": "protein",
+                "#t-car": "carbs", "#t-fat": "fat"}};
+  for (const [sel, key] of Object.entries(map)) {{
+    $(sel).value = d.target[key];
+    $(sel).closest(".t").classList.toggle("mine", mine.includes(key));
+  }}
+  $("#t-reset").hidden = !d.target.custom;
+}}
+
+Object.keys(TILES).forEach(sel => {{
+  const el = $(sel);
+  el.addEventListener("change", saveTiles);
+  el.addEventListener("keydown", e => {{ if (e.key === "Enter") el.blur(); }});
+}});
+
+$("#t-reset").onclick = async () => {{
+  await fetch("/api/profile", {{
+    method: "POST", headers: {{"Content-Type": "application/json"}},
+    body: JSON.stringify({{custom_calories: null, custom_protein: null,
+                          custom_carbs: null, custom_fat: null}})}});
+  location.reload();
+}};
+
 document.querySelectorAll(".theme").forEach(el => {{
   el.onclick = async () => {{
     const name = el.dataset.theme;
     await save({{theme: name}});
     $("#banner").src = "/themes/" + el.dataset.file;
+    $("#banner").style.objectPosition = "center " + (el.dataset.focus || 50) + "%";
     document.querySelectorAll(".theme").forEach(x => x.classList.remove("on"));
     el.classList.add("on");
   }};
@@ -915,12 +1140,29 @@ class Handler(BaseHTTPRequestHandler):
     def log_message(self, *a):  # keep the terminal readable
         pass
 
+    # The scan runs inside the store's page, which is a different origin, and
+    # Chrome preflights any request from a public page to a local address.
+    # Without these the harvest script cannot hand its result back.
+    def _cors(self):
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "POST, GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Headers", "Content-Type")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Access-Control-Max-Age", "600")
+
+    def do_OPTIONS(self):
+        self.send_response(204)
+        self._cors()
+        self.send_header("Content-Length", "0")
+        self.end_headers()
+
     def _send(self, code, body, ctype="text/html; charset=utf-8"):
         if isinstance(body, str):
             body = body.encode("utf-8")
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
+        self._cors()
         self.end_headers()
         self.wfile.write(body)
 
@@ -943,6 +1185,16 @@ class Handler(BaseHTTPRequestHandler):
                 with open(full, "rb") as fh:
                     return self._send(200, fh.read(), ctype)
             return self._send(404, b"not found", "text/plain")
+        if path == "/api/ping":
+            _touch()
+            return self._send(200, b"ok", "text/plain")
+
+        if path == "/api/steps":
+            from urllib.parse import parse_qs, urlparse
+            key = (parse_qs(urlparse(self.path).query).get("store") or [""])[0]
+            store = stores_mod.get(key, load_config())
+            return self._send(200, how_to_steps(store.name if store else "the store"))
+
         if path == "/api/state":
             return self._send(200, json.dumps({
                 "branding": branding.load(),
@@ -981,6 +1233,34 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
             finally:
                 _state["running"] = False
+
+        if path == "/api/scan/submit":
+            # The scan itself, posted straight from the store page. A browser
+            # extension cannot write to disk, so the page hands it over here
+            # and the panel saves it.
+            from urllib.parse import parse_qs, urlparse
+            query = parse_qs(urlparse(self.path).query)
+            key = (query.get("store") or [""])[0]
+            store = stores_mod.get(key, load_config())
+            if store is None:
+                return self._send(404, json.dumps({"error": "unknown store"}),
+                                  "application/json")
+            text = raw.decode("utf-8", errors="replace")
+            lines = [ln for ln in text.splitlines() if ln.strip()]
+            if not lines:
+                return self._send(400, json.dumps(
+                    {"error": "the scan was empty"}), "application/json")
+            os.makedirs(os.path.dirname(store.harvest_path), exist_ok=True)
+            with open(store.harvest_path, "w", encoding="utf-8") as fh:
+                fh.write("\n".join(lines) + "\n")
+            return self._send(200, json.dumps(
+                {"saved": store.harvest_path, "lines": len(lines),
+                 "store": store.name}), "application/json")
+
+        if path == "/api/bye":
+            # Sent as the page unloads. A reload will ping again within seconds.
+            _touch(closing=True)
+            return self._send(200, b"ok", "text/plain")
 
         if path.startswith("/api/scan/"):
             try:
@@ -1100,6 +1380,8 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true")
+    ap.add_argument("--idle-timeout", type=float, default=IDLE_GRACE,
+                    help="stop once the browser has been gone this long (0 = never)")
     args = ap.parse_args(argv)
 
     url = f"http://127.0.0.1:{args.port}"
@@ -1113,6 +1395,8 @@ def main(argv=None):
         return 1
     print(f"{branding.load().get('app_name')} - control panel\n  {url}\n"
           "  Press Ctrl+C to stop.")
+    threading.Thread(target=_watchdog, args=(server, args.idle_timeout),
+                     daemon=True).start()
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:

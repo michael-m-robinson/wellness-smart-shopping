@@ -25,8 +25,6 @@ DEFAULT_STORES: Dict[str, dict] = {
         "urls": [
             {"label": "Open the digital coupon list",
              "url": "https://www.shoprite.com/sm/planning/rsid/{store_id}/digital-coupon"},
-            {"label": "Open the weekly ad",
-             "url": "https://www.shoprite.com/sm/planning/rsid/{store_id}/weekly-ad"},
         ],
     },
     "stews": {
