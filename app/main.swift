@@ -4,6 +4,7 @@ import CoreGraphics
 import CoreText
 import PDFKit
 import WebKit
+import QuartzCore
 
 struct ShoppingItem {
     let id: String
@@ -108,6 +109,8 @@ struct ListOptions {
     let weightPounds: Double?
     let prioritizeSales: Bool
     let saleItemIDs: Set<String>
+    /// item id -> store the imported offer came from (for redeem notices).
+    var saleSources: [String: String] = [:]
 }
 
 final class PriceBook {
@@ -172,6 +175,42 @@ let catalog: [ShoppingItem] = [
 
 let excludedIngredientTerms = ["soy", "tofu", "tempeh", "edamame", "miso", "cabbage", "coleslaw", "sauerkraut", "organic", "cottage cheese", "yogurt", "yoplait", "peanut", "walnut"]
 
+
+/// What a store needs before its deals count at the register. Kept in step
+/// with the "redeem" notices in dealcrawler/stores.py, which the control panel
+/// shows after a scan. `mustAct` is true when skipping it means paying full price.
+struct RedeemNotice {
+    let title: String
+    let body: String
+    let mustAct: Bool
+}
+
+func redeemNotice(for store: String) -> RedeemNotice? {
+    let key = store.lowercased()
+    if key.contains("shoprite") {
+        return RedeemNotice(
+            title: "SHOPRITE: LOG IN AND LOAD YOUR COUPONS BEFORE YOU SHOP",
+            body: "You must be logged in to ShopRite, because it's the only way you can load coupons to your account. Log in at shoprite.com, open Digital Coupons and tap Load to Card on each item marked LOAD COUPON FIRST. It only takes a minute - and any coupon you skip rings up at the regular price.",
+            mustAct: true)
+    }
+    if key.contains("costco") {
+        // Costco's own terms: "instant savings", "Active Costco membership
+        // required for warehouse purchases", per-household limits.
+        return RedeemNotice(
+            title: "COSTCO: GOOD NEWS - NO CLIPPING",
+            body: "Costco calls these instant savings: there are no coupons to clip or load. You just need an active Costco membership in the warehouse. Limits are per household, and a few deals are online only.",
+            mustAct: false)
+    }
+    if key.contains("stew") {
+        // Weekly specials are the week's prices. For flyer "APP DEAL" items the
+        // flyer says: scan your Member ID or enter your phone number at checkout.
+        return RedeemNotice(
+            title: "STEW LEONARD'S: NO COUPONS TO CLIP",
+            body: "These are simply this week's sale prices - all of them are on Stew's website under This Week's Specials. For anything marked APP DEAL, scan your Member ID in the free Stew Leonard's app (or give your phone number) at checkout and the deal is applied for you.",
+            mustAct: false)
+    }
+    return nil
+}
 
 struct DetectedCoupon {
     let itemID: String
@@ -313,6 +352,9 @@ func parseSalesXML(_ data: Data, items: [ShoppingItem]) -> [DetectedCoupon] {
     guard let doc = try? XMLDocument(data: data, options: []),
           let nodes = try? doc.nodes(forXPath: "//offer") else { return [] }
     let byID = Dictionary(items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+    // The crawler writes the store once, on the root (<shopriteSales store="...">);
+    // an offer may still carry its own.
+    let fileStore = doc.rootElement()?.attribute(forName: "store")?.stringValue
     var bestByItem: [String: DetectedCoupon] = [:]
     for node in nodes {
         guard let element = node as? XMLElement else { continue }
@@ -323,7 +365,7 @@ func parseSalesXML(_ data: Data, items: [ShoppingItem]) -> [DetectedCoupon] {
             savings = item.fallbackPrice - salePrice
         }
         guard savings > 0 else { continue }
-        let store = attr("store") ?? "ShopRite"
+        let store = attr("store") ?? fileStore ?? "ShopRite"
         let limit = max(1, min(25, Int(attr("limit") ?? "") ?? 1))
         let title = attr("note") ?? item.name
         let offer = DetectedCoupon(
@@ -1512,6 +1554,14 @@ final class PDFWriter {
                 ? "DEALS APPLIED: this list was built from your nutrition target at shelf prices, then \(plan.prioritizedSaleItems) verified official offer\(plan.prioritizedSaleItems == 1 ? "" : "s") landed on items it already called for. Regular totals, offer savings, and estimated checkout are shown below. Account offers must still be clipped."
                 : "DEALS CHECKED: none of this week's verified offers covered anything on this list, so nothing was substituted."
             drawSmall(saleNote)
+            // What each store needs before these offers count at the register.
+            let saleStores = Set(plan.rows.compactMap { row -> String? in
+                guard row.couponSavings > 0, options.saleItemIDs.contains(row.item.id) else { return nil }
+                return options.saleSources[row.item.id] ?? row.item.store
+            })
+            let notices = saleStores.compactMap { redeemNotice(for: $0) }
+                .sorted { $0.mustAct && !$1.mustAct }
+            for notice in notices { drawRedeemBanner(notice) }
         }
 
         var currentGroup = ""
@@ -1527,7 +1577,11 @@ final class PDFWriter {
             let verifiedSale = options.prioritizeSales && options.saleItemIDs.contains(item.id) && row.couponSavings > 0
             let saleMark = verifiedSale ? "SALE • " : ""
             let offerDetail = row.couponSavings > 0 ? " | regular \(money(row.grossLineTotal)) | offer -\(money(row.couponSavings))" : ""
-            let sourceDetail = verifiedSale ? "\(item.store) / \(item.aisle) • verified offer" : "\(item.store) / \(item.aisle) • estimate"
+            let offerStore = options.saleSources[item.id] ?? item.store
+            let mustLoad = verifiedSale && (redeemNotice(for: offerStore)?.mustAct ?? false)
+            let sourceDetail = verifiedSale
+                ? "\(item.store) / \(item.aisle) • \(mustLoad ? "LOAD COUPON FIRST" : "verified offer")"
+                : "\(item.store) / \(item.aisle) • estimate"
             drawRow(name: saleMark + favoriteMark + item.name, detail: "\(row.quantity) x \(item.package)\(offerDetail)", source: sourceDetail, price: money(row.lineTotal))
         }
 
@@ -1607,7 +1661,9 @@ final class PDFWriter {
             ? "Coupons applied: -\(money(plan.couponSavings)) | Before coupons: \(money(plan.grossSubtotal))"
             : "Coupons applied: $0.00"
         let saleText = options.prioritizeSales ? " | Needed items a deal covered: \(plan.prioritizedSaleItems)" : ""
-        drawText("\(couponText)\(saleText) | Checked: \(retailerCount) retailer anchors, \(usdaCount) USDA foods", x: margin + 10, y: y + 86, width: 500, font: .systemFont(ofSize: 7.6), color: .darkGray)
+        let checkedText = retailerCount + usdaCount > 0
+            ? " | Checked: \(retailerCount) retailer anchors, \(usdaCount) USDA foods" : ""
+        drawText("\(couponText)\(saleText)\(checkedText)", x: margin + 10, y: y + 86, width: 500, font: .systemFont(ofSize: 7.6), color: .darkGray)
         y += 118
     }
 
@@ -1692,6 +1748,25 @@ final class PDFWriter {
         y += rowHeight
     }
 
+    /// A heavy-bordered box that cannot be skimmed past. Low-ink: no fill.
+    private func drawRedeemBanner(_ notice: RedeemNotice) {
+        let width = pageRect.width - margin * 2
+        let inner = width - 28
+        let titleFont = NSFont.boldSystemFont(ofSize: notice.mustAct ? 12 : 10.5)
+        let bodyFont = NSFont.systemFont(ofSize: 8.5)
+        let title = (notice.mustAct ? "!  " : "") + notice.title
+        let titleHeight = pdfTextHeight(title, width: inner, font: titleFont)
+        let bodyHeight = pdfTextHeight(notice.body, width: inner, font: bodyFont)
+        let height = titleHeight + bodyHeight + 26
+        ensureSpace(height + 12)
+        context.setStrokeColor(NSColor.black.cgColor)
+        context.setLineWidth(notice.mustAct ? 3 : 1.5)
+        context.stroke(CGRect(x: margin, y: y, width: width, height: height))
+        _ = drawText(title, x: margin + 14, y: y + 9, width: inner, font: titleFont)
+        _ = drawText(notice.body, x: margin + 14, y: y + 15 + titleHeight, width: inner, font: bodyFont)
+        y += height + 12
+    }
+
     private func drawSmall(_ text: String) {
         ensureSpace(38)
         let height = drawText(text, x: margin, y: y + 5, width: pageRect.width - margin * 2, font: .systemFont(ofSize: 7), color: .darkGray)
@@ -1742,7 +1817,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     let shoprite = NSButton(checkboxWithTitle: "ShopRite", target: nil, action: nil)
     let stews = NSButton(checkboxWithTitle: "Stew Leonard's", target: nil, action: nil)
     let prioritizeSales = NSButton(checkboxWithTitle: "Apply deals to the list", target: nil, action: nil)
-    let usdaKeyField = NSTextField(string: "")
     let mealDBKeyField = NSTextField(string: "")
     let keyBenefitBanner = NSTextField(wrappingLabelWithString: "Optional paid TheMealDB supporter key: free key 1 still works. Supporter access adds V2, multi-ingredient filters, higher production access, recipe uploads, and app-store publishing rights under current terms.")
     let recipeDiet = NSPopUpButton()
@@ -1767,7 +1841,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         UserDefaults.standard.string(forKey: "controlPanelURL") ?? "http://127.0.0.1:8765"
     }
 
-    let couponsButton = NSButton(title: "Scan with Claude...", target: nil, action: nil)
+    let couponsButton = NSButton(title: "Scan Deals...", target: nil, action: nil)
+    /// When deals were last imported from a scan. PDFs wait until there is one.
+    private let dealsScannedAtKey = "dealsScannedAt"
+    /// A scan older than this is last week's deals, so it no longer counts.
+    private let dealsFreshFor: TimeInterval = 7 * 24 * 60 * 60
+    private var scanNudge: NSPopover?
     let printButton = NSButton(title: "Print Last PDFs...", target: nil, action: nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -1778,6 +1857,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         prioritizeSales.state = (UserDefaults.standard.object(forKey: "prioritizeVerifiedSales") as? Bool ?? true) ? .on : .off
         makeMenu()
         buildWindow()
+        // Keep an installed Scanner in step with this build.
+        if FileManager.default.fileExists(atPath: AppDelegate.scannerFolder.path) { syncScanner() }
         restoreLastOutput()
         NSApp.activate(ignoringOtherApps: true)
     }
@@ -1819,7 +1900,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         title.frame = NSRect(x: 28, y: 755, width: 500, height: 34)
         title.font = .boldSystemFont(ofSize: 26)
         view.addSubview(title)
-        let subtitle = NSTextField(labelWithString: "Low-ink PDF lists with checkboxes, transparent estimates and trusted food data")
+        let subtitle = NSTextField(labelWithString: "Low-ink PDF lists with checkboxes, priced against this week's scanned deals")
         subtitle.frame = NSRect(x: 30, y: 730, width: 680, height: 22)
         subtitle.textColor = .darkGray
         view.addSubview(subtitle)
@@ -1867,31 +1948,27 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         prioritizeSales.toolTip = "Meals and the shopping list are always built from your nutrition target first. With this on, the week's imported offers are then applied to that finished list and cheaper on-sale substitutes are proposed for what is on it."
         view.addSubview(prioritizeSales)
 
-        let box = NSBox(frame: NSRect(x: 25, y: 225, width: 710, height: 225))
-        box.title = "Recipe matching + trusted food checks"
+        let box = NSBox(frame: NSRect(x: 25, y: 265, width: 710, height: 185))
+        box.title = "Recipe matching"
         view.addSubview(box)
-        view.addSubview(label("USDA FoodData Central key", frame: NSRect(x: 45, y: 395, width: 190, height: 22)))
-        usdaKeyField.frame = NSRect(x: 240, y: 392, width: 250, height: 26); usdaKeyField.placeholderString = "Blank uses DEMO_KEY"; view.addSubview(usdaKeyField)
-        view.addSubview(label("TheMealDB key", frame: NSRect(x: 45, y: 355, width: 190, height: 22)))
-        mealDBKeyField.frame = NSRect(x: 240, y: 352, width: 250, height: 26)
+        view.addSubview(label("TheMealDB key", frame: NSRect(x: 45, y: 395, width: 190, height: 22)))
+        mealDBKeyField.frame = NSRect(x: 240, y: 392, width: 250, height: 26)
         mealDBKeyField.placeholderString = "Blank uses free key 1"
         mealDBKeyField.delegate = self
         view.addSubview(mealDBKeyField)
-        view.addSubview(label("Healthy lifestyle", frame: NSRect(x: 45, y: 315, width: 190, height: 22)))
-        recipeDiet.frame = NSRect(x: 240, y: 310, width: 250, height: 30)
+        view.addSubview(label("Healthy lifestyle", frame: NSRect(x: 45, y: 355, width: 190, height: 22)))
+        recipeDiet.frame = NSRect(x: 240, y: 350, width: 250, height: 30)
         recipeDiet.addItems(withTitles: ["Mediterranean", "DASH", "Plant-forward", "Vegetarian", "Pescatarian", "High-fiber balanced", "Low-sodium heart healthy"])
         view.addSubview(recipeDiet)
-        view.addSubview(label("Nutrition goal", frame: NSRect(x: 45, y: 275, width: 190, height: 22)))
-        nutritionGoal.frame = NSRect(x: 240, y: 270, width: 250, height: 30)
+        view.addSubview(label("Nutrition goal", frame: NSRect(x: 45, y: 315, width: 190, height: 22)))
+        nutritionGoal.frame = NSRect(x: 240, y: 310, width: 250, height: 30)
         nutritionGoal.addItems(withTitles: NutritionGoal.allCases.map { $0.rawValue })
         nutritionGoal.selectItem(withTitle: NutritionGoal.cutting.rawValue)
         view.addSubview(nutritionGoal)
 
-        let checkButton = NSButton(title: "Check USDA + Store Prices", target: self, action: #selector(checkInformation(_:)))
-        checkButton.frame = NSRect(x: 510, y: 372, width: 200, height: 34); checkButton.bezelStyle = .rounded; view.addSubview(checkButton)
         let recipeButton = NSButton(title: "Match Recipes to This List", target: self, action: #selector(fetchRecipes(_:)))
-        recipeButton.frame = NSRect(x: 510, y: 322, width: 200, height: 34); recipeButton.bezelStyle = .rounded; view.addSubview(recipeButton)
-        keyBenefitBanner.frame = NSRect(x: 45, y: 232, width: 665, height: 34)
+        recipeButton.frame = NSRect(x: 510, y: 386, width: 200, height: 34); recipeButton.bezelStyle = .rounded; view.addSubview(recipeButton)
+        keyBenefitBanner.frame = NSRect(x: 45, y: 272, width: 665, height: 34)
         keyBenefitBanner.font = .systemFont(ofSize: 8.5, weight: .medium)
         keyBenefitBanner.textColor = NSColor(calibratedRed: 0.08, green: 0.32, blue: 0.12, alpha: 1)
         keyBenefitBanner.backgroundColor = NSColor(calibratedRed: 0.87, green: 0.97, blue: 0.88, alpha: 1)
@@ -2040,7 +2117,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     private func updateCouponsButton() {
         // Deals arrive from the control panel now, so the button always names
         // that route rather than counting coupons.
-        couponsButton.title = "Scan with Claude..."
+        couponsButton.title = "Scan Deals..."
     }
 
     @objc func manageCoupons(_ sender: Any?) {
@@ -2054,7 +2131,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // NSPanel hides itself when the app deactivates, which would make this
         // vanish the moment the browser opens. Keep it on screen.
         panel.hidesOnDeactivate = false
-        panel.title = "Scan with Claude"
+        panel.title = "Scan Deals"
         panel.center()
 
         let heading = NSTextField(labelWithString: "Scan this week's deals")
@@ -2062,7 +2139,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         heading.frame = NSRect(x: 24, y: 206, width: 512, height: 24)
         panel.contentView?.addSubview(heading)
 
-        let note = NSTextField(wrappingLabelWithString: "Start the control panel and Claude reads this week's deals from the store page you are signed in to. It writes a sales file, which you import here.")
+        let note = NSTextField(wrappingLabelWithString: "Start the control panel and scan this week's deals there, with the Scanner extension or Claude. It writes a sales file, which you import here. PDFs are made only after a scan.")
         note.frame = NSRect(x: 24, y: 152, width: 512, height: 48)
         note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
         panel.contentView?.addSubview(note)
@@ -2078,6 +2155,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         importXML.frame = NSRect(x: 212, y: 104, width: 170, height: 32)
         importXML.bezelStyle = .rounded
         panel.contentView?.addSubview(importXML)
+
+        let scanner = NSButton(title: "Set Up Scanner...", target: self, action: #selector(setUpScanner(_:)))
+        scanner.toolTip = "Put the Scanner extension where your browser can load it, and show how."
+        scanner.frame = NSRect(x: 390, y: 104, width: 146, height: 32)
+        scanner.bezelStyle = .rounded
+        panel.contentView?.addSubview(scanner)
 
         let spinner = NSProgressIndicator(frame: NSRect(x: 24, y: 68, width: 16, height: 16))
         spinner.style = .spinning; spinner.isDisplayedWhenStopped = false
@@ -2104,6 +2187,84 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
         couponsPanel = panel
         panel.makeKeyAndOrderFront(nil)
+    }
+
+    // MARK: - The Scanner extension
+
+    /// Where the Scanner lives for the browser to load: a stable folder in
+    /// Application Support, so the path survives app updates and the app can
+    /// refresh it in place.
+    static var scannerFolder: URL {
+        dataDirectory.appendingPathComponent("Scanner Extension")
+    }
+
+    /// The copy that ships inside the app (Resources/panel/extension).
+    private var bundledScanner: URL? {
+        let url = Bundle.main.bundleURL.appendingPathComponent("Contents/Resources/panel/extension")
+        return FileManager.default.fileExists(atPath: url.appendingPathComponent("manifest.json").path) ? url : nil
+    }
+
+    /// Copy the bundled Scanner into its folder when missing or out of date.
+    /// Returns false if there is nothing to copy (a build without it).
+    @discardableResult
+    func syncScanner() -> Bool {
+        guard let source = bundledScanner else { return false }
+        let target = AppDelegate.scannerFolder
+        let fm = FileManager.default
+        func version(_ dir: URL) -> String? {
+            guard let data = try? Data(contentsOf: dir.appendingPathComponent("manifest.json")),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+            return json["version"] as? String
+        }
+        let bundledVersion = version(source)
+        if fm.fileExists(atPath: target.path), version(target) == bundledVersion,
+           let a = try? fm.contentsOfDirectory(atPath: source.appendingPathComponent("sites").path),
+           let b = try? fm.contentsOfDirectory(atPath: target.appendingPathComponent("sites").path),
+           Set(a) == Set(b),
+           // Same version and same site files: compare the site files' bytes too,
+           // since a site fix may ship without a version bump.
+           a.allSatisfy({ fm.contentsEqual(atPath: source.appendingPathComponent("sites/\($0)").path,
+                                           andPath: target.appendingPathComponent("sites/\($0)").path) }) {
+            return true
+        }
+        // Replace the contents, not the folder, so a browser that loaded it
+        // keeps pointing at the same place.
+        try? fm.createDirectory(at: target, withIntermediateDirectories: true)
+        for item in (try? fm.contentsOfDirectory(atPath: target.path)) ?? [] {
+            try? fm.removeItem(at: target.appendingPathComponent(item))
+        }
+        for item in (try? fm.contentsOfDirectory(atPath: source.path)) ?? [] where item != "test" {
+            try? fm.copyItem(at: source.appendingPathComponent(item), to: target.appendingPathComponent(item))
+        }
+        return true
+    }
+
+    @objc func setUpScanner(_ sender: Any?) {
+        guard syncScanner() else {
+            let alert = NSAlert()
+            alert.messageText = "This build has no Scanner inside"
+            alert.informativeText = "Load the extension folder from the project instead (deal-crawler/extension)."
+            alert.runModal()
+            return
+        }
+        let folder = AppDelegate.scannerFolder
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(folder.path, forType: .string)
+        NSWorkspace.shared.activateFileViewerSelecting([folder])
+
+        let alert = NSAlert()
+        alert.messageText = "Add the Scanner to your browser"
+        alert.informativeText = """
+        It is one folder, now shown in Finder (its path is on your clipboard). In Chrome or Edge:
+
+        1. Go to chrome://extensions (Edge: edge://extensions).
+        2. Switch on Developer mode.
+        3. Press Load unpacked and choose the "Scanner Extension" folder.
+
+        That's it. When this app updates, it refreshes that folder; press the reload arrow on the Scanner in the extensions page to pick up the new version.
+        """
+        alert.addButton(withTitle: "Done")
+        alert.runModal()
     }
 
     private func persistCoupons() {
@@ -2147,24 +2308,65 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
 
     // Preview the scanned deals and let the user pick which to apply.
+    /// A bold, bordered banner for a store's redeem notice: red when skipping
+    /// it means paying full price, amber when it is only something to know.
+    private func redeemBannerView(_ notice: RedeemNotice, width: CGFloat) -> NSView {
+        let color: NSColor = notice.mustAct ? .systemRed : .systemOrange
+        let text = NSMutableAttributedString(
+            string: (notice.mustAct ? "⚠︎ " : "") + notice.title + "\n",
+            attributes: [.font: NSFont.systemFont(ofSize: 13, weight: .heavy), .foregroundColor: color])
+        text.append(NSAttributedString(string: notice.body,
+            attributes: [.font: NSFont.systemFont(ofSize: 11.5), .foregroundColor: NSColor.labelColor]))
+        let label = NSTextField(wrappingLabelWithString: "")
+        label.attributedStringValue = text
+        label.preferredMaxLayoutWidth = width - 28
+        let fit = label.sizeThatFits(NSSize(width: width - 28, height: 1000))
+        let box = NSBox(frame: NSRect(x: 0, y: 0, width: width, height: fit.height + 24))
+        box.boxType = .custom
+        box.borderWidth = notice.mustAct ? 3 : 2
+        box.cornerRadius = 8
+        box.borderColor = color
+        box.fillColor = color.withAlphaComponent(0.10)
+        box.titlePosition = .noTitle
+        box.contentViewMargins = NSSize(width: 12, height: 10)
+        label.frame = NSRect(x: 12, y: 10, width: width - 28, height: fit.height)
+        box.contentView?.addSubview(label)
+        return box
+    }
+
     private func presentScannedDealsPreview(_ offers: [DetectedCoupon]) -> [DetectedCoupon]? {
         let sorted = offers.sorted { $0.savingsPerPackage > $1.savingsPerPackage }
         let alert = NSAlert()
         alert.messageText = "Apply these scanned deals?"
         let potential = sorted.reduce(0.0) { $0 + $1.savingsPerPackage }
-        alert.informativeText = "Matched from this week's public ShopRite circular. These are advertised sale prices (savings estimated vs. the app's normal price), not card-clip digital coupons — verify at your store, and uncheck anything that looks off. Potential per-package savings: \(money(potential))."
+        let stores = Set(sorted.map { $0.store }).sorted().joined(separator: ", ")
+        alert.informativeText = "Matched from this week's \(stores) scan. Savings are estimated against the app's normal price - verify at your store, and uncheck anything that looks off. Potential per-package savings: \(money(potential))."
         alert.addButton(withTitle: "Apply Selected")
         alert.addButton(withTitle: "Cancel")
         let rowHeight = 24
         let width = 470
-        let height = min(320, max(1, sorted.count) * rowHeight + 6)
+        let listHeight = min(320, max(1, sorted.count) * rowHeight + 6)
+        // What these stores need before the savings count, above the list.
+        let notices = Set(sorted.map { $0.store }).compactMap { redeemNotice(for: $0) }
+            .sorted { $0.mustAct && !$1.mustAct }
+        var banners: [NSView] = []
+        for notice in notices { banners.append(redeemBannerView(notice, width: CGFloat(width))) }
+        let bannerHeight = banners.reduce(0) { $0 + Int($1.frame.height) + 8 }
+        let height = listHeight + bannerHeight
         let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
+        var top = CGFloat(height)
+        for banner in banners {
+            top -= banner.frame.height
+            banner.frame.origin = NSPoint(x: 0, y: top)
+            container.addSubview(banner)
+            top -= 8
+        }
         var boxes: [(NSButton, DetectedCoupon)] = []
         for (index, offer) in sorted.enumerated() {
             let name = catalog.first { $0.id == offer.itemID }?.name ?? offer.matchedTitle
             let box = NSButton(checkboxWithTitle: "\(name) · est. save \(money(offer.savingsPerPackage))/package", target: nil, action: nil)
             box.state = .on
-            box.frame = NSRect(x: 0, y: height - (index + 1) * rowHeight, width: width, height: rowHeight)
+            box.frame = NSRect(x: 0, y: listHeight - (index + 1) * rowHeight, width: width, height: rowHeight)
             container.addSubview(box)
             boxes.append((box, offer))
         }
@@ -2309,7 +2511,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 }
                 if self.controlPanelIsRunning {
                     DispatchQueue.main.async { NSWorkspace.shared.open(url) }
-                    self.setControlPanelBusy(false, "Control panel ready. Press Scan with Claude there, then import the file it writes. It closes when you quit this app.")
+                    self.setControlPanelBusy(false, "Control panel ready. Scan there, then import the file it writes. It closes when you quit this app.")
                     return
                 }
                 self.setControlPanelBusy(true, "Waiting for the control panel to come up... (\(attempt * 5)/100)")
@@ -2333,6 +2535,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         panel.message = "Choose a sales XML file (catalog itemId + savings or salePrice per offer)."
         guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
         let offers = parseSalesXML(data, items: catalog)
+        // The scan happened, whether or not any of it matched this list.
+        UserDefaults.standard.set(Date(), forKey: dealsScannedAtKey)
         guard !offers.isEmpty else {
             couponScanStatus?.stringValue = "No matching offers found in \(url.lastPathComponent). Check the XML uses valid catalog item IDs."
             return
@@ -2343,7 +2547,9 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         applyDetectedCoupons(chosen)
         let total = chosen.reduce(0.0) { $0 + $1.savingsPerPackage }
-        couponScanStatus?.stringValue = "Imported \(chosen.count) offer(s) from \(url.lastPathComponent) (est. \(money(total))/package saved). Verify at your store."
+        let mustLoad = Set(chosen.map { $0.store }).compactMap { redeemNotice(for: $0) }.filter { $0.mustAct }
+        let reminder = mustLoad.isEmpty ? "" : " Next: log in to ShopRite and load these coupons to your account - it's the only way they come off at the register."
+        couponScanStatus?.stringValue = "Imported \(chosen.count) offer(s) from \(url.lastPathComponent) (est. \(money(total))/package saved). Verify at your store.\(reminder)"
     }
 
     @objc func clearCoupons(_ sender: Any?) {
@@ -2353,6 +2559,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         UserDefaults.standard.removeObject(forKey: "couponSavingsByItem")
         UserDefaults.standard.removeObject(forKey: "couponLimitsByItem")
         UserDefaults.standard.removeObject(forKey: "couponSourcesByItem")
+        UserDefaults.standard.removeObject(forKey: dealsScannedAtKey)
         updateCouponsButton()
         couponScanStatus?.stringValue = "Imported deals cleared."
         status.stringValue = "Deals cleared. New reports will use regular estimated prices."
@@ -2368,63 +2575,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         status.stringValue = "\(count) imported deal\(count == 1 ? "" : "s") in effect, \(money(perPackage)) per package; actual savings depend on quantities."
     }
 
-    @objc func checkInformation(_ sender: Any?) {
-        guard !working else { return }
-        working = true
-        status.stringValue = "Checking official USDA food records and available retailer product pages..."
-        let group = DispatchGroup()
-        let lock = NSLock()
-        let usdaKey = usdaKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "DEMO_KEY" : usdaKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
-        let checks = Array(catalog.filter { $0.sourceURL != nil }.prefix(8))
-        for item in checks {
-            if let raw = item.sourceURL, let url = URL(string: raw) {
-                group.enter()
-                URLSession.shared.dataTask(with: url) { data, _, _ in
-                    defer { group.leave() }
-                    guard let data, let html = String(data: data, encoding: .utf8), let value = self.closestPrice(in: html, fallback: item.fallbackPrice) else { return }
-                    lock.lock(); self.priceBook.prices[item.id] = value; self.priceBook.retailerChecked.insert(item.id); lock.unlock()
-                }.resume()
-            }
-            var parts = URLComponents(string: "https://api.nal.usda.gov/fdc/v1/foods/search")!
-            parts.queryItems = [URLQueryItem(name: "api_key", value: usdaKey), URLQueryItem(name: "query", value: item.name), URLQueryItem(name: "pageSize", value: "1")]
-            if let url = parts.url {
-                group.enter()
-                URLSession.shared.dataTask(with: url) { data, _, _ in
-                    defer { group.leave() }
-                    guard let data,
-                          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                          let total = json["totalHits"] as? Int, total > 0 else { return }
-                    lock.lock(); self.priceBook.usdaChecked.insert(item.id); lock.unlock()
-                }.resume()
-            }
-        }
-        group.notify(queue: .main) {
-            self.working = false
-            self.priceBook.lastChecked = Date()
-            self.status.stringValue = "Check complete: \(self.priceBook.retailerChecked.count) retailer price anchors refreshed and \(self.priceBook.usdaChecked.count) foods matched through USDA FoodData Central. Unchecked items still use labeled fallback estimates."
-        }
-    }
-
-    private func closestPrice(in html: String, fallback: Double) -> Double? {
-        let patterns = [#"\"price\"\s*:\s*\"?([0-9]+\.[0-9]{2})"#, #"\$\s*([0-9]+\.[0-9]{2})"#]
-        var values: [Double] = []
-        for pattern in patterns {
-            guard let regex = try? NSRegularExpression(pattern: pattern) else { continue }
-            let range = NSRange(html.startIndex..<html.endIndex, in: html)
-            for match in regex.matches(in: html, range: range).prefix(50) {
-                guard match.numberOfRanges > 1, let r = Range(match.range(at: 1), in: html), let value = Double(html[r]), value >= 0.25, value <= 250 else { continue }
-                values.append(value)
-            }
-        }
-        // Scraped HTML is full of unrelated dollar figures. Only accept a candidate within a
-        // sane band around our labeled estimate; otherwise keep the fallback rather than
-        // publishing a shipping fee or nearby product's price as a "refreshed" anchor.
-        let lowerBound = fallback * 0.4
-        let upperBound = fallback * 2.5
-        return values
-            .filter { $0 >= lowerBound && $0 <= upperBound }
-            .min { abs($0 - fallback) < abs($1 - fallback) }
-    }
 
     private func mealDBRecipe(from data: Data) -> (recipe: Recipe, category: String)? {
         guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
@@ -2544,8 +2694,72 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
     }
 
+    /// True once this week's deals have been scanned and imported.
+    private var hasFreshScan: Bool {
+        guard let at = UserDefaults.standard.object(forKey: dealsScannedAtKey) as? Date else { return false }
+        return Date().timeIntervalSince(at) < dealsFreshFor
+    }
+
+    /// No PDF without deals: point at the scan button instead.
+    private func nudgeToScan() {
+        let stale = UserDefaults.standard.object(forKey: dealsScannedAtKey) != nil
+        let message = stale
+            ? "Your last scan is over a week old. Scan this week's deals first - your PDFs are priced with them."
+            : "Scan this week's deals first - your PDFs are priced with them."
+        status.stringValue = message
+        pulse(couponsButton)
+
+        scanNudge?.close()
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = .systemFont(ofSize: 12)
+        label.frame = NSRect(x: 12, y: 10, width: 236, height: 40)
+        let content = NSViewController()
+        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 60))
+        content.view.addSubview(label)
+        let popover = NSPopover()
+        popover.contentViewController = content
+        popover.contentSize = content.view.frame.size
+        popover.behavior = .transient
+        popover.show(relativeTo: couponsButton.bounds, of: couponsButton, preferredEdge: .maxY)
+        scanNudge = popover
+        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak popover] in popover?.close() }
+    }
+
+    /// A ring that swells and fades around a button, a few times over.
+    private func pulse(_ button: NSView) {
+        guard let host = button.superview else { return }
+        host.wantsLayer = true
+        guard let layer = host.layer else { return }
+        let ring = CALayer()
+        ring.frame = button.frame.insetBy(dx: -3, dy: -3)
+        ring.cornerRadius = 9
+        ring.borderWidth = 3
+        ring.borderColor = NSColor.systemGreen.cgColor
+        ring.opacity = 0
+        layer.addSublayer(ring)
+
+        let grow = CABasicAnimation(keyPath: "transform.scale")
+        grow.fromValue = 1.0; grow.toValue = 1.18
+        let fade = CABasicAnimation(keyPath: "opacity")
+        fade.fromValue = 0.95; fade.toValue = 0.0
+        let beat = CAAnimationGroup()
+        beat.animations = [grow, fade]
+        beat.duration = 0.9
+        beat.repeatCount = 4
+        beat.timingFunction = CAMediaTimingFunction(name: .easeOut)
+        CATransaction.begin()
+        CATransaction.setCompletionBlock { ring.removeFromSuperlayer() }
+        ring.add(beat, forKey: "pulse")
+        CATransaction.commit()
+    }
+
     @objc func createPDF(_ sender: Any?) {
         guard !working else { return }
+        // Deals come before PDFs: the list is priced against this week's scan.
+        guard hasFreshScan else {
+            nudgeToScan()
+            return
+        }
         let useSales = prioritizeSales.state == .on
         UserDefaults.standard.set(useSales, forKey: "prioritizeVerifiedSales")
         guard useSales else {
@@ -2557,11 +2771,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             status.stringValue = "Choose at least one store before refreshing sale offers."
             return
         }
-        // Deals are imported from a Claude scan rather than fetched here, so
+        // Deals are imported from a scan rather than fetched here, so
         // tailoring uses whatever has already been imported.
         let count = verifiedSaleItemIDs().count
         if count == 0 {
-            status.stringValue = "No imported deals yet - creating the list at regular prices. Use Scan with Claude to add this week's deals."
+            status.stringValue = "This week's scan matched nothing on your list - creating it at regular prices."
         } else {
             status.stringValue = "Tailoring the list and recipes around \(count) imported sale item\(count == 1 ? "" : "s")."
         }
@@ -2623,7 +2837,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return
         }
         let saleIDs = verifiedSaleItemIDs()
-        let options = ListOptions(recipient: recipient, days: days, people: people, budgetMin: budgetMin, budgetMax: budgetMax, groupByStore: grouping.indexOfSelectedItem == 0, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: saleIDs)
+        let options = ListOptions(recipient: recipient, days: days, people: people, budgetMin: budgetMin, budgetMax: budgetMax, groupByStore: grouping.indexOfSelectedItem == 0, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: saleIDs, saleSources: couponSources)
         // Recipes must be final before budgeting. Their ingredients become required
         // shopping rows, then optional groceries are optimized around what remains.
         let lifestyle = recipeDiet.titleOfSelectedItem ?? "Mediterranean"
@@ -2734,6 +2948,30 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return
         }
         operation.run()
+    }
+}
+
+extension AppDelegate {
+    /// Lays out the main window (and optionally the Scan Deals panel) and
+    /// writes each to a PNG. Used by --snapshot to review the UI headlessly.
+    func snapshot(to url: URL, scanPanel: URL?) throws {
+        applicationDidFinishLaunching(Notification(name: NSApplication.didFinishLaunchingNotification))
+        try Self.writePNG(of: window.contentView, to: url)
+        if let scanPanel {
+            manageCoupons(nil)
+            try Self.writePNG(of: couponsPanel?.contentView, to: scanPanel)
+        }
+    }
+
+    private static func writePNG(of view: NSView?, to url: URL) throws {
+        guard let view, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else {
+            throw NSError(domain: "Snapshot", code: 1)
+        }
+        view.cacheDisplay(in: view.bounds, to: rep)
+        guard let png = rep.representation(using: .png, properties: [:]) else {
+            throw NSError(domain: "Snapshot", code: 2)
+        }
+        try png.write(to: url)
     }
 }
 
@@ -3023,6 +3261,22 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
         exit(0)
     } catch {
         fputs("SELF_TEST_FAILED \(error)\n", stderr)
+        exit(1)
+    }
+} else if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--snapshot" {
+    // Render the main window and the Scan Deals panel to PNGs, for reviewing
+    // the layout without a screen:  --snapshot main.png [scan-panel.png]
+    let snapshotApplication = NSApplication.shared
+    snapshotApplication.setActivationPolicy(.accessory)
+    let delegate = AppDelegate()
+    do {
+        try delegate.snapshot(to: URL(fileURLWithPath: CommandLine.arguments[2]),
+                              scanPanel: CommandLine.arguments.count >= 4
+                                ? URL(fileURLWithPath: CommandLine.arguments[3]) : nil)
+        print("SNAPSHOT_OK")
+        exit(0)
+    } catch {
+        fputs("SNAPSHOT_FAILED \(error)\n", stderr)
         exit(1)
     }
 } else {

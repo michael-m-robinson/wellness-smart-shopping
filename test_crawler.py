@@ -62,6 +62,20 @@ class TestMatcher(unittest.TestCase):
         ]:
             self.assertIsNone(match(text), text)
 
+    def test_rejects_false_matches_seen_in_real_scans(self):
+        """Each of these reached a sales file on 2026-09-21."""
+        for title in ("Dove Serum+ Oil Body Wash, Serum+ Body Wash, Plant Milk Body Wash",
+                      "Banana Republic Women's Ponte Pant",
+                      "Weider Red Yeast Rice Plus, 240 ct",
+                      "Campbell's Simply Chicken Noodle Soup, 8/18.6 oz",
+                      "Brazi Bites Brazilian Cheese Bread",
+                      "MUSCLE MILK® 11 oz 4pk"):
+            self.assertIsNone(match(title), title)
+        for title, want in (("Nature's Own Bread", "bread"), ("Bananas", "fruit"),
+                            ("Rana Family Size Pasta Item 18oz or larger", "pasta"),
+                            ("Low Fat Milk 1 gal", "milk")):
+            self.assertEqual(match(title), want, title)
+
     def test_disambiguates_compounds(self):
         self.assertEqual(match("Chicken Broth 32 oz"), "broth")
         self.assertEqual(match("Beef Bouillon Cubes"), "broth")
@@ -605,10 +619,42 @@ class TestDesktopAppSource(unittest.TestCase):
         self.assertIn('forResource: name', self.src)
         self.assertIn('["theme"]', self.src)
 
-    def test_button_reads_scan_with_claude(self):
-        self.assertIn('NSButton(title: "Scan with Claude..."', self.src)
+    def test_button_reads_scan_deals(self):
+        # Scanning is the Scanner extension or Claude, so the button names neither.
+        self.assertIn('NSButton(title: "Scan Deals..."', self.src)
         self.assertNotIn("Find & Apply Coupons", self.src)
         self.assertNotIn('"Coupons (', self.src)
+
+    def test_no_pdf_before_a_scan(self):
+        """Deals come first: without this week's scan, point at the button."""
+        create = self.src[self.src.index("@objc func createPDF"):]
+        create = create[:create.index("private func createPDFNow")]
+        self.assertLess(create.index("guard hasFreshScan"),
+                        create.index("createPDFNow(sender)"))
+        self.assertIn("nudgeToScan()", create)
+        nudge = self.src[self.src.index("private func nudgeToScan"):]
+        nudge = nudge[:nudge.index("private func pulse")]
+        self.assertIn("pulse(couponsButton)", nudge)
+        self.assertIn("NSPopover()", nudge)
+        self.assertIn("of: couponsButton", nudge)
+
+    def test_importing_a_sales_file_counts_as_a_scan(self):
+        imp = self.src[self.src.index("@objc func importSalesXML"):]
+        imp = imp[:imp.index("@objc func clearCoupons")]
+        self.assertIn("forKey: dealsScannedAtKey", imp)
+
+    def test_in_app_store_scraping_is_gone(self):
+        """Store prices come from scans now; the app no longer fetches store pages."""
+        for gone in ("checkInformation", "closestPrice", "usdaKeyField", "Check USDA"):
+            self.assertNotIn(gone, self.src, gone)
+
+    def test_app_can_set_up_the_scanner(self):
+        self.assertIn('"Set Up Scanner..."', self.src)
+        self.assertIn('"Scanner Extension"', self.src)
+        self.assertIn("Contents/Resources/panel/extension", self.src)
+        build = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  "app", "build.sh"), encoding="utf-8").read()
+        self.assertIn(" extension ", build)       # the build bundles it
 
     def test_xml_import_survives(self):
         """The import is the whole point of the pipeline; it must not be lost."""
@@ -995,6 +1041,273 @@ class TestScanDelivery(unittest.TestCase):
     def test_paste_box_exists_as_a_fallback(self):
         self.assertIn('id="w-paste"', self.html)
         self.assertIn('id="w-paste-go"', self.html)
+
+
+
+class TestScannerExtension(unittest.TestCase):
+    """The Chrome extension in extension/ that scans without Claude."""
+
+    HERE = os.path.dirname(os.path.abspath(__file__))
+
+    def manifest(self):
+        import json as _json
+        with open(os.path.join(self.HERE, "extension", "manifest.json")) as fh:
+            return _json.load(fh)
+
+    def test_panel_marks_itself_for_the_bridge(self):
+        import panel
+        self.assertIn('<meta name="wss-panel"', panel.page())
+
+    def test_each_builtin_store_has_its_own_site_and_prompt(self):
+        from dealcrawler import stores
+        for key in ("shoprite", "stews", "costco"):
+            store = stores.get(key, {})
+            self.assertEqual(store.adapter, key)
+            self.assertIn("{submit}", store.prompt, key)
+        # Stew's flyer is images; the scan starts in the online shop.
+        self.assertIn("shopnow.stewleonards.com", stores.get("stews", {}).urls[0]["url"])
+        custom = {"stores": {"corner": {"name": "Corner Shop",
+                                        "urls": ["https://example.com/ad"]}}}
+        self.assertEqual(stores.get("corner", custom).adapter, "")
+        pinned = {"stores": {"corner": {"name": "Corner Shop", "adapter": "generic"}}}
+        self.assertEqual(stores.get("corner", pinned).adapter, "generic")
+
+    def test_every_named_site_ships_and_is_registered(self):
+        from dealcrawler import stores
+        index = open(os.path.join(self.HERE, "extension", "sites", "index.js"),
+                     encoding="utf-8").read()
+        for s in stores.load({}):
+            name = s.adapter or "generic"
+            self.assertTrue(os.path.isfile(os.path.join(
+                self.HERE, "extension", "sites", name + ".js")), name)
+            self.assertIn(f'"sites/{name}.js"', index, name)
+
+    def test_extension_can_reach_the_builtin_stores_and_the_panel(self):
+        from urllib.parse import urlparse
+        from dealcrawler import stores
+        hosts = self.manifest()["host_permissions"]
+        def covered(host):
+            for pattern in hosts:
+                h = urlparse(pattern.replace("*.", "")).hostname
+                if host == h or host.endswith("." + h):
+                    return True
+            return False
+        self.assertTrue(covered("127.0.0.1"))
+        self.assertTrue(covered("shopnow.stewleonards.com"))
+        self.assertTrue(covered("shop-rite-web-prod.azurewebsites.net"))
+        for s in stores.load({}):
+            for u in s.urls:
+                self.assertTrue(covered(urlparse(u["url"]).hostname), u["url"])
+
+    def test_extension_asks_for_little(self):
+        perms = set(self.manifest()["permissions"])
+        # cookies: only to see whether a ShopRite sign-in cookie exists.
+        self.assertLessEqual(perms, {"scripting", "activeTab", "storage", "cookies"})
+        self.assertNotIn("<all_urls>", self.manifest()["host_permissions"])
+
+    def test_extension_is_read_only(self):
+        """Site files never click. The engine presses one thing -- a list's own
+        "more" button -- and only after refusing cart/coupon/account labels."""
+        folder = os.path.join(self.HERE, "extension", "sites")
+        for name in os.listdir(folder):
+            if name.endswith(".js"):
+                source = open(os.path.join(folder, name), encoding="utf-8").read()
+                self.assertNotIn(".click(", source, name)
+        engine = open(os.path.join(self.HERE, "extension", "engine", "engine.js"),
+                      encoding="utf-8").read()
+        self.assertEqual(engine.count(".click("), 1)
+        press = engine[engine.index("function pressMore"):]
+        press = press[:press.index("\n  }\n")]
+        self.assertLess(press.index("NEVER_PRESS.test(label)"), press.index(".click("))
+        for word in ("cart", "clip", "coupon", "card", "login", "sign", "confirm"):
+            self.assertIn(word, engine[engine.index("const NEVER_PRESS"):][:300])
+
+    def test_adapter_tests_pass(self):
+        import shutil
+        import subprocess
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        folder = os.path.join(self.HERE, "extension", "test")
+        files = sorted(os.path.join(folder, f) for f in os.listdir(folder)
+                       if f.endswith(".test.js"))
+        self.assertGreaterEqual(len(files), 2)
+        run = subprocess.run([node, "--test", *files], capture_output=True,
+                             text=True, timeout=60)
+        self.assertEqual(run.returncode, 0, run.stdout[-2000:] + run.stderr[-2000:])
+
+
+class TestPanelScript(unittest.TestCase):
+    def test_page_script_parses(self):
+        """One stray quote in the page's script breaks every button on it."""
+        import shutil
+        import subprocess
+        import tempfile
+        import panel
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node is not installed")
+        html_out = panel.page()
+        js = html_out[html_out.rindex("<script>") + 8:html_out.rindex("</script>")]
+        with tempfile.NamedTemporaryFile("w", suffix=".js", delete=False) as fh:
+            fh.write(js)
+        try:
+            run = subprocess.run([node, "--check", fh.name], capture_output=True,
+                                 text=True, timeout=30)
+            self.assertEqual(run.returncode, 0, run.stderr[-1500:])
+        finally:
+            os.unlink(fh.name)
+
+
+class TestRedeemNotices(unittest.TestCase):
+    """ShopRite coupons only count once loaded to a signed-in account; say so
+    loudly wherever deals are acted on."""
+
+    def test_each_store_says_what_it_needs(self):
+        from dealcrawler import stores
+        cfg = {"stores": {"shoprite": {"store_id": "392"}}}
+        shoprite = stores.get("shoprite", cfg).redeem
+        self.assertEqual(shoprite["level"], "action")
+        why = "because it's the only way you can load coupons to your account"
+        self.assertIn("You must be logged in to ShopRite", shoprite["body"])
+        self.assertIn(why, shoprite["body"])
+        self.assertIn(why, shoprite["login"]["body"])
+        self.assertTrue(shoprite["login"]["button"])
+        self.assertIn("logged in", shoprite["signed_in"]["title"])
+        self.assertIn("rsid/392/", shoprite["link"]["url"])
+        # Costco: its own terms -- instant savings, membership, no clipping.
+        costco = stores.get("costco", cfg).redeem
+        self.assertEqual(costco["level"], "info")
+        self.assertIn("no clipping", costco["title"].lower())
+        self.assertIn("instant savings", costco["body"])
+        self.assertIn("membership", costco["body"])
+        # Stew's: sale prices, all on its website; APP DEAL items apply when
+        # you scan your Member ID (or give your phone number) at checkout.
+        stews = stores.get("stews", cfg).redeem
+        self.assertEqual(stews["level"], "info")
+        self.assertIn("APP DEAL", stews["body"])
+        self.assertIn("Member ID", stews["body"])
+        self.assertIn("shopnow.stewleonards.com", stews["link"]["url"])
+        self.assertTrue(stews["link"]["scanned"])
+
+    def test_a_store_can_set_its_own_notice(self):
+        from dealcrawler import stores
+        cfg = {"stores": {"corner": {"name": "Corner", "redeem": {
+            "level": "action", "title": "Clip first", "body": "In the app."}}}}
+        self.assertEqual(stores.get("corner", cfg).redeem["title"], "Clip first")
+
+    def test_login_bar_sits_at_the_top_of_the_page(self):
+        import panel
+        html_out = panel.page()
+        body = html_out[html_out.index("<body>"):]
+        self.assertLess(body.index('id="loginbar"'), body.index('id="banner"'))
+        self.assertIn('id="loginbar-later"', body)
+        self.assertIn('"login":', html_out)          # ShopRite's copy is on the page
+        self.assertIn(".note[hidden]", html_out)     # hidden must beat display:flex
+
+    def test_bridge_tag_cannot_be_overwritten_by_a_result(self):
+        """A result field named "source" once replaced the bridge's tag, and
+        the panel silently ignored every scan result."""
+        here = os.path.dirname(os.path.abspath(__file__))
+        bridge = open(os.path.join(here, "extension", "panel-bridge.js"),
+                      encoding="utf-8").read()
+        self.assertIn('{ ...msg, source: "wss-scanner" }', bridge)
+        bg = open(os.path.join(here, "extension", "background.js"), encoding="utf-8").read()
+        scan = bg[bg.index("async function scan(job)"):bg.index("async function checkAll")]
+        self.assertNotIn(" source:", scan)
+
+    def test_signed_in_check_reads_cookie_names_never_values(self):
+        here = os.path.dirname(os.path.abspath(__file__))
+        bg = open(os.path.join(here, "extension", "background.js"), encoding="utf-8").read()
+        acct = bg[bg.index("async function accountStatus"):]
+        acct = acct[:acct.index("\n}\n")]
+        self.assertIn("c.name", acct)
+        self.assertNotIn(".value", acct)
+        self.assertNotIn("fetch(", acct)
+
+    def test_panel_shows_the_banner_on_the_scan_result(self):
+        import panel
+        html_out = panel.page()
+        done = html_out[html_out.index('<section id="w-done"'):]
+        self.assertLess(done.index('id="w-redeem"'), done.index('id="w-done-title"'))
+        self.assertIn('role="status"', done[:400])
+        self.assertIn("showRedeem(wizState.started", html_out)
+
+    def test_app_warns_in_the_preview_and_on_the_pdf(self):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "app", "main.swift"), encoding="utf-8").read()
+        self.assertIn("func redeemNotice(for store: String)", src)
+        preview = src[src.index("private func presentScannedDealsPreview"):]
+        preview = preview[:preview.index("return alert.runModal()")]
+        self.assertIn("redeemBannerView(", preview)
+        self.assertNotIn("not card-clip digital coupons", src)
+        self.assertIn("for notice in notices { drawRedeemBanner(notice) }", src)
+        self.assertIn("LOAD COUPON FIRST", src)
+        # The store is on the sales file's root, not on each offer.
+        self.assertIn('rootElement()?.attribute(forName: "store")', src)
+
+
+class TestScannerReports(unittest.TestCase):
+    """The panel keeps the Scanner's diagnostics so a broken site can be fixed."""
+
+    def test_report_is_saved_per_store_with_a_history_line(self):
+        import json as _json
+        import tempfile
+        import threading
+        import urllib.request as _req   # a loopback call to our own test server
+        import panel
+        from dealcrawler import paths
+        from http.server import ThreadingHTTPServer
+        saved = paths.DATA_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            paths.DATA_DIR = tmp
+            server = ThreadingHTTPServer(("127.0.0.1", 0), panel.Handler)
+            threading.Thread(target=server.serve_forever, daemon=True).start()
+            try:
+                port = server.server_address[1]
+                body = _json.dumps({"site": "stews", "ok": False, "failedAt": "ready",
+                                    "error": "no cards", "steps": {"ready": {"found": 0}}})
+                for key in ("stews", "../../etc"):
+                    r = _req.urlopen(_req.Request(
+                        f"http://127.0.0.1:{port}/api/scanner/report?store={key}",
+                        data=body.encode(), headers={"Content-Type": "application/json"}))
+                    self.assertEqual(r.status, 200)
+                report = _json.load(open(os.path.join(tmp, "scanner", "stews.json")))
+                self.assertEqual(report["failedAt"], "ready")
+                history = open(os.path.join(tmp, "scanner", "history.jsonl")).read().splitlines()
+                self.assertEqual(len(history), 2)
+                # A hostile key is flattened into the folder, never outside it.
+                self.assertEqual(sorted(os.listdir(os.path.join(tmp, "scanner"))),
+                                 ["etc.json", "history.jsonl", "stews.json"])
+            finally:
+                server.shutdown()
+                paths.DATA_DIR = saved
+
+
+class TestPanelLifetime(unittest.TestCase):
+    """The panel stops when its page closes -- not on a heartbeat."""
+
+    def test_page_holds_a_live_connection_and_sends_no_heartbeat(self):
+        import panel
+        html_out = panel.page()
+        self.assertIn('EventSource("/api/live")', html_out)
+        self.assertNotIn("/api/ping", html_out)
+        self.assertNotIn("setInterval(() => {{ fetch", html_out)
+
+    def test_pages_are_counted_in_and_out(self):
+        import panel
+        before = dict(panel._alive)
+        try:
+            panel._page_opened()
+            panel._page_opened()
+            panel._page_closed()
+            self.assertEqual(panel._alive["pages"], before["pages"] + 1)
+            self.assertEqual(panel._alive["empty_since"], 0.0)
+            panel._page_closed()
+            if before["pages"] == 0:
+                self.assertGreater(panel._alive["empty_since"], 0.0)
+        finally:
+            panel._alive.update(before)
 
 
 if __name__ == "__main__":

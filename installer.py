@@ -177,8 +177,60 @@ def check_extension():
             if EXTENSION_ID in dirnames:
                 report(OK, "Claude for Chrome", os.path.basename(root))
                 return True, os.path.basename(root)
-    report(WARN, "Claude for Chrome", "not detected - needed for scanning")
+    report(WARN, "Claude for Chrome", "not detected - optional with the Scanner")
     return False, ""
+
+
+SCANNER_DIR = os.path.join(HERE, "extension")
+BROWSER_ROOTS = [
+    "~/Library/Application Support/Google/Chrome",
+    "~/Library/Application Support/Chromium",
+    "~/Library/Application Support/BraveSoftware/Brave-Browser",
+    "~/Library/Application Support/Microsoft Edge",
+    "~/Library/Application Support/Arc",
+]
+
+
+def check_scanner():
+    """Look for the Scanner extension, loaded unpacked from this folder.
+
+    An unpacked extension is not copied into the profile; the profile's
+    preferences record the folder it was loaded from, so that is what is read.
+    """
+    want = os.path.realpath(SCANNER_DIR)
+    for root in BROWSER_ROOTS:
+        base = os.path.expanduser(root)
+        if not os.path.isdir(base):
+            continue
+        for dirpath, dirnames, filenames in os.walk(base):
+            if dirpath.count(os.sep) - base.count(os.sep) > 2:
+                dirnames[:] = []
+                continue
+            for name in ("Secure Preferences", "Preferences"):
+                if name not in filenames:
+                    continue
+                try:
+                    with open(os.path.join(dirpath, name), encoding="utf-8") as fh:
+                        prefs = json.load(fh)
+                except (OSError, ValueError):
+                    continue
+                settings = (prefs.get("extensions") or {}).get("settings") or {}
+                for entry in settings.values():
+                    path = entry.get("path") if isinstance(entry, dict) else None
+                    if path and os.path.realpath(path) == want:
+                        report(OK, "Scanner extension", os.path.basename(root))
+                        return True, os.path.basename(root)
+    report(WARN, "Scanner extension", "not loaded yet - the easy way to scan")
+    return False, ""
+
+
+def scanner_steps():
+    print()
+    print("    To load the Scanner extension (once):")
+    print("      1. Open " + BOLD("chrome://extensions") + " in Chrome")
+    print("      2. Switch on " + BOLD("Developer mode") + " (top right)")
+    print("      3. Press " + BOLD("Load unpacked") + " and choose this folder:")
+    print("         " + BOLD(SCANNER_DIR))
 
 
 # ------------------------------------------------------------- one copy only
@@ -415,9 +467,10 @@ def step_prerequisites(step, total):
     py_ok, py = check_python()
     swift_ok, swift = check_swift()
     chrome_ok, chrome = check_chrome()
+    scanner_ok, scanner = check_scanner()
     ext_ok, ext = check_extension()
     state["detected"] = {"macOS": mac, "python": py, "swift": swift,
-                         "chrome": chrome, "extension": ext}
+                         "chrome": chrome, "scanner": scanner, "extension": ext}
 
     if not py_ok:
         print()
@@ -437,7 +490,12 @@ def step_prerequisites(step, total):
 
     if not chrome_ok and ask("Open the Chrome download page?", default=True):
         open_url(CHROME_URL)
-    if not ext_ok and ask("Open the Claude for Chrome extension page?", default=True):
+    if not scanner_ok and ask("Show how to load the Scanner extension?", default=True):
+        scanner_steps()
+        run(["open", "-R", os.path.join(SCANNER_DIR, "manifest.json")])
+    # Claude is the fallback now; only point at it when neither is there.
+    if not scanner_ok and not ext_ok and ask(
+            "Or open the Claude for Chrome extension page?", default=False):
         open_url(EXTENSION_URL)
     return True
 

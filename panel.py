@@ -37,29 +37,38 @@ paths.ensure_data_dir()
 _state = {"running": False, "last": None}
 _lock = threading.Lock()
 
-# The panel should not outlive the window it serves. A page can send a beacon
-# as it unloads, but that fires on reload and navigation too, so the beacon
-# only shortens the deadline -- a heartbeat is what actually decides. Nothing
-# happens until the first heartbeat arrives, so a panel started by the desktop
-# app before any browser opens is left alone.
-_alive = {"last_seen": 0.0, "seen": False, "closing": False,
+# The panel should not outlive the window it serves. Each open panel page holds
+# a live connection to /api/live; closing the tab or navigating away drops it,
+# and the panel stops once none are left. There is no heartbeat: nothing is
+# sent on a timer by the page. Nothing happens until the first page connects,
+# so a panel started by the desktop app before any browser opens is left alone.
+_alive = {"pages": 0, "seen": False, "empty_since": 0.0,
           # A scan happens in another tab, and the user may well close this
           # one to get at it. Shutting down mid-scan would throw the offers
           # away when the store page posts them back, so a scan in progress
           # holds the panel open.
           "scanning_since": 0.0}
+_alive_lock = threading.Lock()
 SCAN_HOLD_MAX = 45 * 60.0   # a scan left open forever should not pin it
 # Filled in once the server binds, so the prompt carries the real port rather
 # than an assumed one.
 _base = {"url": "http://127.0.0.1:8765"}
-IDLE_GRACE = 12.0      # no heartbeat for this long -> the window is gone
-CLOSING_GRACE = 4.0    # after a close beacon, this long for a reload to return
+CLOSE_GRACE = 3.0      # after the last page goes, this long for a reload to return
+LIVE_PROBE = 1.0       # how often the server checks a live connection is still there
 
 
-def _touch(closing=False):
-    _alive["last_seen"] = time.monotonic()
-    _alive["seen"] = True
-    _alive["closing"] = closing
+def _page_opened():
+    with _alive_lock:
+        _alive["pages"] += 1
+        _alive["seen"] = True
+        _alive["empty_since"] = 0.0
+
+
+def _page_closed():
+    with _alive_lock:
+        _alive["pages"] = max(0, _alive["pages"] - 1)
+        if _alive["pages"] == 0:
+            _alive["empty_since"] = time.monotonic()
 
 
 # ---- accepting scans -------------------------------------------------------
@@ -91,21 +100,22 @@ def set_scanning_active(value: bool) -> bool:
     return value
 
 
-def _watchdog(server, idle_timeout):
-    if idle_timeout <= 0:
+def _watchdog(server, close_grace):
+    if close_grace <= 0:
         return
     while True:
-        time.sleep(1.0)
-        if not _alive["seen"]:
+        time.sleep(0.5)
+        with _alive_lock:
+            seen, pages, since = (_alive["seen"], _alive["pages"],
+                                  _alive["empty_since"])
+        if not seen or pages or not since:
             continue
         # Hold while a scan is open, however the window behaves.
         started = _alive["scanning_since"]
         if started and time.monotonic() - started < SCAN_HOLD_MAX:
             continue
-        grace = CLOSING_GRACE if _alive["closing"] else idle_timeout
-        if time.monotonic() - _alive["last_seen"] > grace:
-            reason = "window closed" if _alive["closing"] else "no browser for a while"
-            print(f"\nStopping: {reason}.")
+        if time.monotonic() - since > close_grace:
+            print("\nStopping: the panel page was closed.")
             try:
                 server.shutdown()
             except Exception:
@@ -239,8 +249,17 @@ def build_for(store) -> dict:
             xml_path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
             with open(xml_path, "w", encoding="utf-8") as fh:
                 fh.write(xml)
+    # The offers themselves, once per product (a snack twin repeats its
+    # parent's), so the scan result can list what to load to an account.
+    listed, seen = [], set()
+    for o in offers:
+        if o.title in seen:
+            continue
+        seen.add(o.title)
+        listed.append({"title": o.title, "savings": o.savings,
+                       "sale_price": o.sale_price, "limit": o.limit})
     return {"found": True, "count": len(offers), "xml": xml_path,
-            "mtime": os.path.getmtime(store.harvest_path)}
+            "offers": listed, "mtime": os.path.getmtime(store.harvest_path)}
 
 
 def scan_help() -> list:
@@ -367,6 +386,13 @@ def page() -> str:
     msg_opts = "".join(
         f'<option value="{html.escape(str(m))}">{html.escape(str(m))}</option>'
         for m in presets)
+    # Stores whose deals need you signed in (ShopRite coupons): the panel asks
+    # the Scanner whether you are, and shows the login bar if not.
+    account_json = json.dumps([
+        {"key": st.key, "site": st.adapter or st.key, "name": st.name,
+         "login": st.redeem["login"],
+         "url": (st.redeem.get("link") or {}).get("url", "")}
+        for st in stores_mod.load(load_config()) if st.redeem.get("login")])
     pick_html = "".join(
         f'<button class="picker" data-store="{html.escape(st["key"])}">'
         f'<b>{html.escape(st["store"])}</b>'
@@ -413,20 +439,70 @@ def page() -> str:
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="wss-panel" content="1">
 <title>{g('app_name')}</title>
 <style>
   :root {{
     --bg:#f7f6f3; --card:#fff; --ink:#1c1b19; --muted:#6b6862;
     --line:#e5e2dc; --accent:#3f7d4f; --accent-ink:#fff;
     --good:#2f7a45; --warn:#9a6212; --warn-bg:#fdf5e6;
+    --warm-1:#fff6ec; --warm-2:#ffe8d4; --warm-line:#f2c29a; --warm-ink:#5b3415;
+    --warm-btn:#d8661f; --warm-btn-ink:#fff; --warm-icon:#ffd9b8;
+    --fresh-1:#f1faf3; --fresh-2:#e1f3e6; --fresh-line:#a9d8b6; --fresh-ink:#1f4a2c;
+    --fresh-icon:#c9ebd3;
   }}
   @media (prefers-color-scheme: dark) {{
     :root:not([data-theme="light"]) {{
       --bg:#16181a; --card:#1e2124; --ink:#eceae6; --muted:#a3a09a;
       --line:#2e3236; --accent:#6fae7d; --accent-ink:#10231a;
       --good:#7cc08e; --warn:#e0b070; --warn-bg:#2a2317;
+      --warm-1:#3a2617; --warm-2:#2f1f13; --warm-line:#6e4524; --warm-ink:#ffe2c6;
+      --warm-btn:#f29a5c; --warm-btn-ink:#2a1508; --warm-icon:#57371e;
+      --fresh-1:#17281c; --fresh-2:#132219; --fresh-line:#2f5a3b; --fresh-ink:#cdeed6;
+      --fresh-icon:#24432e;
     }}
   }}
+  /* Friendly notices: warm peach when there is something to do first,
+     fresh mint when it is good news. Prominent, never alarming. */
+  .note{{display:flex;gap:14px;align-items:flex-start;border-radius:16px;
+    padding:16px 18px;border:1.5px solid var(--warm-line);color:var(--warm-ink);
+    background:linear-gradient(135deg,var(--warm-1),var(--warm-2));
+    box-shadow:0 8px 22px -14px rgba(120,60,10,.45)}}
+  /* display rules above would otherwise override the hidden attribute */
+  .note[hidden],.note [hidden]{{display:none !important}}
+  .note.fresh{{border-color:var(--fresh-line);color:var(--fresh-ink);
+    background:linear-gradient(135deg,var(--fresh-1),var(--fresh-2));
+    box-shadow:0 8px 22px -14px rgba(20,90,40,.4)}}
+  .note .ico{{flex:0 0 42px;height:42px;border-radius:50%;display:grid;place-items:center;
+    background:var(--warm-icon)}}
+  .note.fresh .ico{{background:var(--fresh-icon)}}
+  .note .ico svg{{width:22px;height:22px}}
+  .note .txt{{flex:1;min-width:0}}
+  .note h3{{margin:1px 0 5px;font-size:1.1rem;font-weight:750;line-height:1.3}}
+  .note p{{margin:0;line-height:1.5}}
+  .note .acts{{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;margin-top:12px}}
+  .note .go{{display:inline-block;padding:9px 16px;border-radius:999px;font-weight:700;
+    text-decoration:none;background:var(--warm-btn);color:var(--warm-btn-ink)}}
+  .note.fresh .go{{background:var(--accent);color:var(--accent-ink)}}
+  .note .go:hover{{filter:brightness(1.05)}}
+  .note .later{{background:none;border:0;padding:4px 2px;color:inherit;
+    text-decoration:underline;text-underline-offset:3px;font-size:.92rem}}
+  .note .x{{flex:0 0 auto;background:none;border:0;padding:2px 6px;margin:-4px -6px 0 0;
+    color:inherit;font-size:1.3rem;line-height:1;opacity:.6}}
+  .note .x:hover{{opacity:1}}
+  #loginbar{{margin:16px 0}}
+  #w-redeem{{margin:0 0 18px}}
+  .redeem-items{{list-style:none;margin:14px 0 0;padding:0}}
+  .redeem-items li{{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;
+    padding:10px 12px;margin:0 0 8px;border-radius:12px;
+    background:color-mix(in srgb,var(--card) 72%,transparent)}}
+  .redeem-items .what{{flex:1 1 200px;min-width:0}}
+  .redeem-items .what b{{display:block;font-weight:650}}
+  .redeem-items .what span{{font-size:.88rem;opacity:.85}}
+  .redeem-items button{{padding:5px 12px;font-size:.82rem;border-radius:999px}}
+  .redeem-items a{{font-weight:650;font-size:.88rem;color:inherit}}
+  .redeem-items .redeem-hint{{background:none;padding:0 2px;margin:0 0 6px;font-size:.92rem}}
+  @media (max-width:520px){{.note{{padding:14px}} .note .ico{{display:none}}}}
   *{{box-sizing:border-box}}
   body{{margin:0;background:var(--bg);color:var(--ink);
     font:16px/1.55 -apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif}}
@@ -584,6 +660,21 @@ def page() -> str:
     header p{{font-size:1.32rem}} .deal{{flex-wrap:wrap}} .deal .ti{{white-space:normal}}
   }}
 </style></head><body><div class="wrap">
+
+<div class="note" id="loginbar" role="status" aria-live="polite" hidden>
+  <div class="ico" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"
+    stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+    <circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg></div>
+  <div class="txt">
+    <h3 id="loginbar-title"></h3>
+    <p id="loginbar-body"></p>
+    <div class="acts">
+      <a class="go" id="loginbar-go" target="_blank" rel="noopener"></a>
+      <button type="button" class="later" id="loginbar-later">Maybe later</button>
+    </div>
+  </div>
+  <button type="button" class="x" id="loginbar-x" aria-label="Dismiss">&times;</button>
+</div>
 
 <header>
   <img id="banner" src="/themes/{html.escape(banner_file)}" alt=""
@@ -797,6 +888,11 @@ def page() -> str:
 
   <section id="w-wait" hidden>
     <h2 id="w-wait-title"></h2>
+    <p class="muted" id="w-scanner-body" hidden>The Scanner extension is
+      reading the store in a new tab. It only reads the page; it never loads,
+      clips or buys anything. Leave this window open.</p>
+    <div id="w-claude">
+    <p class="muted" id="w-claude-lead" hidden>Or scan with Claude instead:</p>
     <p class="muted">{g('scan_wait_body')}</p>
     <div id="w-links"></div>
     <ol class="howsteps" id="w-steps"></ol>
@@ -816,12 +912,22 @@ def page() -> str:
       Need the extension?
       <a href="{g('extension_url')}" target="_blank" rel="noopener">Install Claude for Chrome</a>
     </p>
+    </div>
     <p class="muted" id="w-status" style="margin:16px 0 0">
       <span class="spin"></span>{g('scan_waiting')}</p>
     <div class="row" style="margin:14px 0 0"><button id="w-cancel">Cancel</button></div>
   </section>
 
   <section id="w-done" hidden>
+    <div class="note" id="w-redeem" role="status" hidden>
+      <div class="ico" aria-hidden="true" id="w-redeem-ico"></div>
+      <div class="txt">
+        <h3 id="w-redeem-title"></h3>
+        <p id="w-redeem-body"></p>
+        <ul class="redeem-items" id="w-redeem-items" hidden></ul>
+        <div class="acts"><a class="go" id="w-redeem-link" target="_blank" rel="noopener" hidden></a></div>
+      </div>
+    </div>
     <h2 id="w-done-title"></h2>
     <p id="w-done-body" class="muted"></p>
     <div class="row" style="margin:16px 0 0">
@@ -970,14 +1076,11 @@ actSw.onclick = async () => {{
 fetch("/api/state").then(r => r.json())
   .then(d => paintActive(d.active !== false)).catch(() => {{}});
 
-// ---- keep-alive ------------------------------------------------------------
-// The panel stops once this page goes away, so closing the tab does not leave
-// a server running in the background.
-setInterval(() => {{ fetch("/api/ping").catch(() => {{}}); }}, 4000);
-fetch("/api/ping").catch(() => {{}});
-addEventListener("pagehide", () => {{
-  try {{ navigator.sendBeacon("/api/bye"); }} catch (e) {{}}
-}});
+// ---- lifetime --------------------------------------------------------------
+// This page holds one open connection to the panel. Closing the tab or
+// navigating away drops it, and the panel stops -- so closing the tab does not
+// leave a server running in the background. Nothing is sent on a timer.
+try {{ new EventSource("/api/live"); }} catch (e) {{}}
 
 // ---- Claude for Chrome notice --------------------------------------------
 // A page cannot reliably detect an installed extension: the resources this one
@@ -1015,6 +1118,45 @@ function store(key, value) {{
   bar.hidden = false;
   $("#w-ext").hidden = false;
 }})();
+
+// ---- Scanner extension -----------------------------------------------------
+// extension/panel-bridge.js announces itself on this page. When it is here, a
+// scan runs in the browser with no instruction to copy.
+let SCANNER = document.documentElement.dataset.wssScanner || "";
+let scannerJob = null;
+
+function scannerFound(version) {{
+  SCANNER = version || SCANNER || "yes";
+  $("#extbar").hidden = true;
+  $("#w-ext").hidden = true;
+  const b = $("#scanwith");
+  if (b.textContent.trim() === "Scan with Claude") b.textContent = "Scan deals";
+}}
+
+addEventListener("message", (e) => {{
+  if (e.source !== window || !e.data || e.data.source !== "wss-scanner") return;
+  const d = e.data;
+  if (d.type === "ready") scannerFound(d.version);
+  if (d.type === "progress" && scannerJob) {{
+    $("#w-status").innerHTML = '<span class="spin"></span>' + esc(d.text || "");
+  }}
+  if (d.type === "result" && scannerJob) {{
+    scannerJob = null;
+    if (d.ok && d.pageUrl) wizState.pageUrl = d.pageUrl;
+    if (d.ok) {{
+      // Saved by the panel; the poll picks up the new file from here.
+      $("#w-status").innerHTML = '<span class="spin"></span>' +
+        esc("Read " + d.count + " offers. Matching them to your list...");
+    }} else {{
+      wizStop();
+      $("#w-status").textContent = d.error || "The scan did not finish.";
+      $("#w-claude").hidden = false;
+      $("#w-claude-lead").hidden = false;
+    }}
+  }}
+}});
+postMessage({{source: "wss-panel", type: "hello"}}, location.origin);
+if (SCANNER) scannerFound(SCANNER);
 
 $("#ext-have").onclick = () => {{
   store("wss.hasExtension", "yes");
@@ -1064,6 +1206,8 @@ document.querySelectorAll(".picker").forEach(el => {{
     $("#w-signin-title").textContent = {j('scan_signin_title')}.replace("{{store}}", d.name);
     $("#w-signin-links").innerHTML = links;
     $("#w-links").innerHTML = links;
+    // A store's own reader knows its page (ShopRite's is read signed out).
+    if (SCANNER && d.adapter && d.adapter !== "generic") return beginWait();
     wizStep("w-signin");
   }};
 }});
@@ -1072,7 +1216,9 @@ $("#w-signin-back").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
 
 // Only once they say they are signed in does the instruction appear: a scan of
 // a signed-out page comes back empty or wrong.
-$("#w-signin-go").onclick = async () => {{
+$("#w-signin-go").onclick = () => beginWait();
+
+async function beginWait() {{
   const d = wizState.started;
   if (!d) return;
   $("#w-wait-title").textContent = {j('scan_wait_title')}.replace("{{store}}", d.name);
@@ -1083,9 +1229,18 @@ $("#w-signin-go").onclick = async () => {{
     $("#w-steps").innerHTML = steps;
   }} catch (e) {{ $("#w-steps").innerHTML = ""; }}
   $("#w-status").innerHTML = '<span class="spin"></span>' + esc({j('scan_waiting')});
+  $("#w-claude").hidden = !!SCANNER;
+  $("#w-claude-lead").hidden = true;
+  $("#w-scanner-body").hidden = !SCANNER;
   wizStep("w-wait");
   wizState.timer = setInterval(wizPoll, 2500);
-}};
+  if (SCANNER) {{
+    scannerJob = wizState.store;
+    postMessage({{source: "wss-panel", type: "scan", store: d.store, name: d.name,
+                  adapter: d.adapter, url: (d.urls && d.urls[0]) ? d.urls[0].url : ""}},
+                location.origin);
+  }}
+}}
 
 $("#w-copy").onclick = async () => {{
   try {{
@@ -1106,6 +1261,7 @@ async function wizPoll() {{
     return;
   }}
   wizState.xml = d.xml || "";
+  showRedeem(wizState.started && wizState.started.redeem, d.count, d.offers || []);
   if (!d.count) {{
     $("#w-done-title").textContent =
       {j('scan_none_title')}.replace("{{store}}", d.name).replace("{{count}}", "0");
@@ -1120,6 +1276,142 @@ async function wizPoll() {{
     $("#w-later").textContent = {j('scan_import_later')};
   }}
   wizStep("w-done");
+}}
+
+// ---- friendly notices ----------------------------------------------------
+const ICONS = {{
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/>' +
+        '<path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/></svg>',
+  tag:  '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><path d="M20.6 13.4l-7.2 7.2a2 2 0 0 1-2.8 0' +
+        'L3 13V3h10l7.6 7.6a2 2 0 0 1 0 2.8z"/><circle cx="7.5" cy="7.5" r="1.5"/></svg>',
+  check:'<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" ' +
+        'stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+}};
+
+// Signed in to each store that needs it? true / false / null (cannot tell).
+// Answered by the Scanner extension from a cookie's name only.
+const ACCOUNT_STORES = {account_json};
+const signedIn = {{}};
+
+function askAccounts() {{
+  if (!SCANNER) return;
+  for (const s of ACCOUNT_STORES) {{
+    postMessage({{source: "wss-panel", type: "account", store: s.site}}, location.origin);
+  }}
+}}
+
+function laterKey(site) {{ return "wss.loginLater." + site; }}
+
+// The bar at the top: shown while you are logged out of a store whose
+// coupons need an account. "Maybe later" hides it for this session.
+function paintLoginBar() {{
+  const bar = $("#loginbar");
+  let later = {{}};
+  const show = ACCOUNT_STORES.find(s => {{
+    try {{ later[s.site] = sessionStorage.getItem(laterKey(s.site)) === "1"; }}
+    catch (e) {{ later[s.site] = false; }}
+    return signedIn[s.site] === false && !later[s.site];
+  }});
+  if (!show) {{ bar.hidden = true; return; }}
+  $("#loginbar-title").textContent = show.login.title;
+  $("#loginbar-body").textContent = show.login.body;
+  const go = $("#loginbar-go");
+  go.textContent = (show.login.button || "Log in") + " \\u2192";
+  go.href = show.url || "#";
+  bar.dataset.site = show.site;
+  bar.hidden = false;
+}}
+
+function loginLater() {{
+  const site = $("#loginbar").dataset.site;
+  try {{ sessionStorage.setItem(laterKey(site), "1"); }} catch (e) {{}}
+  $("#loginbar").hidden = true;
+}}
+$("#loginbar-later").onclick = loginLater;
+$("#loginbar-x").onclick = loginLater;
+
+addEventListener("message", (e) => {{
+  if (e.source !== window || !e.data || e.data.source !== "wss-scanner") return;
+  if (e.data.type === "account") {{
+    signedIn[e.data.store] = e.data.signedIn;
+    paintLoginBar();
+    if (wizState.started && !$("#w-redeem").hidden) showRedeem(
+      wizState.started.redeem, wizState.lastCount, wizState.lastOffers);
+  }}
+  if (e.data.type === "ready") askAccounts();
+}});
+// Back from logging in on the store's site: look again.
+addEventListener("focus", askAccounts);
+document.addEventListener("visibilitychange", () => {{
+  if (document.visibilityState === "visible") askAccounts();
+}});
+askAccounts();
+
+// After a scan: what the store needs before these deals count at the
+// register, and for account coupons (ShopRite) each one to load.
+function showRedeem(r, count, offers) {{
+  const box = $("#w-redeem");
+  wizState.lastCount = count; wizState.lastOffers = offers;
+  if (!r || !r.title || !count) {{ box.hidden = true; return; }}
+  const act = r.level === "action";
+  const site = (wizState.started && (wizState.started.adapter || wizState.started.store)) || "";
+  const isIn = signedIn[site] === true;
+  const words = (act && isIn && r.signed_in) ? r.signed_in : r;
+  box.className = "note " + (act ? "warm" : "fresh");
+  $("#w-redeem-ico").innerHTML = act ? (isIn ? ICONS.tag : ICONS.user) : ICONS.check;
+  $("#w-redeem-title").textContent = words.title;
+  $("#w-redeem-body").textContent = words.body || "";
+  // "scanned" links go to the exact page the Scanner just read, if it said.
+  const url = r.link && ((r.link.scanned && wizState.pageUrl) || r.link.url);
+  const a = $("#w-redeem-link");
+  a.hidden = !url;
+  if (url) {{ a.href = url; a.textContent = (r.link.label || "Open") + " \\u2192"; }}
+
+  // One row per coupon that matched your list: copy its name for the store's
+  // coupon search, then load it there. The store has no per-coupon address,
+  // so every link opens its coupon list.
+  const list = $("#w-redeem-items");
+  list.textContent = "";
+  list.hidden = !(act && offers.length);
+  if (!list.hidden) {{
+    const hint = document.createElement("li");
+    hint.className = "redeem-hint";
+    hint.textContent = "Your " + offers.length + " coupon" + (offers.length === 1 ? "" : "s") +
+      " to load. Tip: copy a name, paste it into ShopRite's " +
+      '"Search all coupons" box, then tap Load to Card.';
+    list.append(hint);
+    for (const o of offers) {{
+      const li = document.createElement("li");
+      const what = document.createElement("span");
+      what.className = "what";
+      const name = document.createElement("b");
+      name.textContent = o.title;
+      const detail = document.createElement("span");
+      const money = o.savings != null ? "Save $" + Number(o.savings).toFixed(2)
+                  : o.sale_price != null ? "$" + Number(o.sale_price).toFixed(2) : "";
+      detail.textContent = [money, o.limit ? "limit " + o.limit : ""].filter(Boolean).join(" \\u00b7 ");
+      what.append(name, detail);
+      const copy = document.createElement("button");
+      copy.type = "button";
+      copy.textContent = "Copy name";
+      copy.onclick = async () => {{
+        try {{ await navigator.clipboard.writeText(o.title); copy.textContent = "Copied!"; }}
+        catch (e) {{ copy.textContent = "Select it"; }}
+        setTimeout(() => copy.textContent = "Copy name", 1500);
+      }};
+      li.append(what, copy);
+      if (url) {{
+        const go = document.createElement("a");
+        go.href = url; go.target = "_blank"; go.rel = "noopener";
+        go.textContent = "Load it \\u2192";
+        li.append(go);
+      }}
+      list.append(li);
+    }}
+  }}
+  box.hidden = false;
 }}
 
 $("#w-import").onclick = async () => {{
@@ -1337,9 +1629,16 @@ class Handler(BaseHTTPRequestHandler):
                                       "application/javascript; charset=utf-8")
             return self._send(404, b"not found", "text/plain")
 
-        if path == "/api/ping":
-            _touch()
-            return self._send(200, b"ok", "text/plain")
+        if path == "/api/stores":
+            # For the Scanner extension's popup: which stores exist, and how
+            # each is read.
+            return self._send(200, json.dumps({"stores": [
+                {"key": s.key, "name": s.name, "urls": s.urls,
+                 "adapter": s.adapter or "generic", "redeem": s.redeem}
+                for s in stores_mod.load(load_config())]}), "application/json")
+
+        if path == "/api/live":
+            return self._live()
 
         if path == "/api/steps":
             from urllib.parse import parse_qs, urlparse
@@ -1355,6 +1654,33 @@ class Handler(BaseHTTPRequestHandler):
                 "active": scanning_active(),
             }), "application/json")
         return self._send(404, b"not found", "text/plain")
+
+    def _live(self):
+        """Hold an event stream open for as long as the panel page is open.
+
+        The page never writes to it. The server sends a blank comment each
+        second only to learn whether the other end is still there: once the
+        tab is closed or navigates away, that write fails and the page is
+        counted as gone.
+        """
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.send_header("Cache-Control", "no-store")
+        self.end_headers()
+        _page_opened()
+        try:
+            self.wfile.write(b"retry: 1000\n\n")
+            self.wfile.flush()
+            while True:
+                time.sleep(LIVE_PROBE)
+                self.wfile.write(b":\n\n")
+                self.wfile.flush()
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError,
+                OSError):
+            pass
+        finally:
+            _page_closed()
+            self.close_connection = True
 
     def do_HEAD(self):
         """Answer HEAD so a readiness probe sees 200 rather than a 501."""
@@ -1386,6 +1712,36 @@ class Handler(BaseHTTPRequestHandler):
                                   "application/json")
             finally:
                 _state["running"] = False
+
+        if path == "/api/scanner/report":
+            # The Scanner extension's diagnostics for one run: which step
+            # failed, how many cards each selector found, samples of what it
+            # could not read. The latest per store is kept, plus a one-line
+            # history, so a site that changed can be fixed from the report.
+            from urllib.parse import parse_qs, urlparse
+            key = (parse_qs(urlparse(self.path).query).get("store") or [""])[0]
+            key = "".join(c for c in key if c.isalnum() or c in "-_")[:40]
+            try:
+                report = json.loads(raw.decode("utf-8") or "{}")
+            except ValueError:
+                return self._send(400, json.dumps({"error": "bad json"}),
+                                  "application/json")
+            if not key or not isinstance(report, dict):
+                return self._send(400, json.dumps({"error": "no store"}),
+                                  "application/json")
+            folder = paths.data("scanner")
+            os.makedirs(folder, exist_ok=True)
+            with open(os.path.join(folder, f"{key}.json"), "w",
+                      encoding="utf-8") as fh:
+                json.dump(report, fh, indent=2, ensure_ascii=False)
+            summary = {k: report.get(k) for k in
+                       ("at", "site", "siteVersion", "ok", "check", "failedAt",
+                        "error", "checks")}
+            with open(os.path.join(folder, "history.jsonl"), "a",
+                      encoding="utf-8") as fh:
+                fh.write(json.dumps({"store": key, **summary},
+                                    ensure_ascii=False) + "\n")
+            return self._send(200, json.dumps({"saved": key}), "application/json")
 
         if path == "/api/scan/submit":
             # The scan itself, posted straight from the store page. A browser
@@ -1428,11 +1784,6 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, json.dumps({"active": scanning_active()}),
                               "application/json")
 
-        if path == "/api/bye":
-            # Sent as the page unloads. A reload will ping again within seconds.
-            _touch(closing=True)
-            return self._send(200, b"ok", "text/plain")
-
         if path.startswith("/api/scan/"):
             try:
                 body = json.loads(raw.decode("utf-8") or "{}")
@@ -1472,6 +1823,8 @@ class Handler(BaseHTTPRequestHandler):
                     prompt_script = prompt_script.replace(token, value)
                 return self._send(200, json.dumps({
                     "store": store.key, "name": store.name, "urls": store.urls,
+                    "adapter": store.adapter or "generic",
+                    "redeem": store.redeem,
                     "path": store.harvest_path, "prompt": prompt,
                     "prompt_script": prompt_script, "script": script,
                     "baseline": baseline,
@@ -1493,6 +1846,7 @@ class Handler(BaseHTTPRequestHandler):
                     "ready": True, "name": store.name,
                     "count": result.get("count", 0),
                     "xml": result.get("xml", ""),
+                    "offers": result.get("offers", []),
                     "error": result.get("error", ""),
                 }), "application/json")
 
@@ -1574,8 +1928,10 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--port", type=int, default=8765)
     ap.add_argument("--no-open", action="store_true")
-    ap.add_argument("--idle-timeout", type=float, default=IDLE_GRACE,
-                    help="stop once the browser has been gone this long (0 = never)")
+    ap.add_argument("--close-grace", "--idle-timeout", dest="close_grace",
+                    type=float, default=CLOSE_GRACE,
+                    help="stop this many seconds after the last panel page "
+                         "closes (0 = never)")
     args = ap.parse_args(argv)
 
     url = f"http://127.0.0.1:{args.port}"
@@ -1590,7 +1946,7 @@ def main(argv=None):
         return 1
     print(f"{branding.load().get('app_name')} - control panel\n  {url}\n"
           "  Press Ctrl+C to stop.")
-    threading.Thread(target=_watchdog, args=(server, args.idle_timeout),
+    threading.Thread(target=_watchdog, args=(server, args.close_grace),
                      daemon=True).start()
     if not args.no_open:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()

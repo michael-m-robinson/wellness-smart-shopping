@@ -1,0 +1,41 @@
+{
+  "manifest_version": 3,
+  "name": "Wellness Smart Shopping Scanner",
+  "short_name": "WSS Scanner",
+  "version": "1.1.0",
+  "description": "Reads this week's grocery deals from your own browser and hands them to your Wellness Smart Shopping control panel. Read-only: it never loads, clips or buys anything.",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  },
+  "action": {
+    "default_title": "Scan deals",
+    "default_popup": "popup.html",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png"
+    }
+  },
+  "background": {
+    "service_worker": "background.js"
+  },
+  "permissions": ["scripting", "activeTab", "storage", "cookies"],
+  "host_permissions": [
+    "http://127.0.0.1/*",
+    "http://localhost/*",
+    "https://shop-rite-web-prod.azurewebsites.net/*",
+    "https://*.shoprite.com/*",
+    "https://*.stewleonards.com/*",
+    "https://*.costco.com/*"
+  ],
+  "content_scripts": [
+    {
+      "matches": ["http://127.0.0.1/*", "http://localhost/*"],
+      "js": ["panel-bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

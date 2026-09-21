@@ -1,0 +1,55 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Scan deals</title>
+<link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <header>
+    <img src="icons/icon32.png" alt="" width="20" height="20">
+    <h1>Scan deals</h1>
+  </header>
+
+  <div id="login" class="hello" role="status" hidden>
+    <strong id="login-title"></strong>
+    <span id="login-body"></span>
+    <a id="login-go" class="go" target="_blank" rel="noopener"></a>
+  </div>
+
+  <p id="panel" class="muted">Looking for the control panel...</p>
+
+  <section id="scan">
+    <label for="store">This page is from</label>
+    <select id="store"></select>
+    <button id="go" class="primary">Scan this page</button>
+    <p class="muted small">Read-only: it never loads, clips or buys anything.</p>
+  </section>
+
+  <p id="status" role="status"></p>
+  <div id="redeem" class="redeem" role="alert" hidden>
+    <strong id="redeem-title"></strong>
+    <span id="redeem-body"></span>
+    <a id="redeem-link" target="_blank" rel="noopener" hidden></a>
+  </div>
+
+  <section id="result" hidden>
+    <textarea id="lines" rows="6" readonly spellcheck="false"></textarea>
+    <button id="copy">Copy offers</button>
+  </section>
+
+  <details id="upkeep">
+    <summary>Site checks</summary>
+    <p class="muted small">Run a store's scanner without filing anything. Each
+      report is saved by the control panel (<code>scanner/&lt;store&gt;.json</code>
+      in its data folder), naming the step and selector that failed.</p>
+    <div class="row">
+      <button id="check">Check this site</button>
+      <button id="checkall">Check all sites</button>
+    </div>
+    <ul id="sites"></ul>
+  </details>
+
+  <script src="popup.js"></script>
+</body>
+</html>

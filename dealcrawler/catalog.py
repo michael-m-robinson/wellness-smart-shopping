@@ -40,6 +40,13 @@ GLOBAL_EXCLUDE = [
     r"\btreats? for\b", r"\bshampoo\b", r"\bdetergent\b", r"\bsoap\b",
     r"\bcandle\b", r"\btoy\b", r"\bsupplement\b", r"\bgummies\b",
     r"\bvitamin\b", r"\bcapsules?\b", r"\bsoftgels?\b",
+    # Seen matching real scans (2026-09-21): "Plant Milk Body Wash" as milk,
+    # "Banana Republic ... Pant" as fruit, "Red Yeast Rice" (a supplement) as rice.
+    r"\bbody wash\b", r"\blotion\b", r"\bshower\b", r"\bdeodorant\b",
+    r"\btoothpaste\b", r"\bcosmetic", r"\bskin ?care\b", r"\bhair\b",
+    r"\bbanana republic\b", r"\bpants?\b", r"\bshirts?\b", r"\bhoodie\b",
+    r"\bcardigan\b", r"\bjacket\b", r"\bsweater\b", r"\bsocks?\b",
+    r"\bred yeast\b", r"\btablets?\b", r"\bprobiotic", r"\bsoup\b",
 ]
 
 ITEMS = [
@@ -60,12 +67,13 @@ ITEMS = [
          require=[r"\bmilk\b"],
          exclude=[r"\balmond\b", r"\bcoconut\b", r"\boat ?milk\b", r"\bcashew\b",
                   r"\bcondensed\b", r"\bevaporated\b", r"\bchocolate\b", r"\bshake\b",
-                  r"\bcreamer\b", r"\bbuttermilk\b", r"\bpowder\b"]),
+                  r"\bcreamer\b", r"\bbuttermilk\b", r"\bpowder\b",
+                  r"\bplant milk\b", r"\bmuscle milk\b", r"\bprotein\b"]),
 
     Item("bread", "Whole-grain bread", "1 loaf", 4.49,
          require=[r"\bbread\b", r"\bloaf\b", r"\bbagels?\b", r"\bEnglish muffins?\b"],
          exclude=[r"\bcrumbs?\b", r"\bpudding\b", r"\bgarlic bread\b", r"\bbanana bread\b",
-                  r"\bstuffing\b", r"\bdough\b"]),
+                  r"\bstuffing\b", r"\bdough\b", r"\bcheese bread\b"]),
 
     Item("fruit", "Mixed apples, pears, oranges and bananas", "weekly mix", 12.00,
          require=[r"\bapples?\b", r"\bpears?\b", r"\boranges?\b", r"\bbananas?\b",

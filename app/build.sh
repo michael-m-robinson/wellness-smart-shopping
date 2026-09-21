@@ -56,7 +56,7 @@ fi
 echo "  bundling the control panel ..."
 PANEL="$OUT/Contents/Resources/panel"
 mkdir -p "$PANEL"
-for item in panel.py crawl.py dealcrawler themes browser examples \
+for item in panel.py crawl.py dealcrawler themes browser examples extension \
             config.example.json branding.example.json; do
   [ -e "../$item" ] && cp -R "../$item" "$PANEL/"
 done

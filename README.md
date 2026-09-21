@@ -95,7 +95,7 @@ cut, because the numbers are on their side.
 | Route | What you run | |
 | --- | --- | --- |
 | **Terminal** — recommended | `python3 panel.py` | Everything lives in one folder you can see: your config, your scans, the sales file. Nothing to find, nothing to permit. |
-| **Desktop app** | Drag it in, press **Scan with Claude** | Adds meal plans, recipes and PDFs. Keeps its files in `~/Library/Application Support/`, away from the folder you are working in. |
+| **Desktop app** | Drag it in, press **Scan Deals** | Adds meal plans, recipes and PDFs. Keeps its files in `~/Library/Application Support/`, away from the folder you are working in. |
 
 Both open the same control panel and produce the same file, and the scan
 instruction is identical either way.
@@ -112,8 +112,8 @@ Then, either way:Then, either way:
 
 | Requirement | Why |
 | --- | --- |
-| **A Claude subscription** | Required for scanning. Claude reads the store page from your own browser. |
-| **[The Claude for Chrome extension](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn)** | Required for scanning. The panel links you to it if it is missing. |
+| **[The Scanner extension](#scan-with-the-scanner-extension)** | The easy way to scan. It ships in `extension/`; load it into Chrome once. No subscription. |
+| **[Claude for Chrome](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn)** + a Claude subscription | Optional. The fallback for a store the Scanner cannot read yet. |
 | **Python 3.9+** | The control panel and crawler. macOS ships it; standard library only, nothing to install. |
 | **Chrome, signed in to your stores** | Digital coupons only exist inside your own logged-in session. Edge, Brave and Arc count too. |
 | No network access of its own | This program never contacts a store. A test enforces it. |
@@ -123,13 +123,14 @@ Then, either way:Then, either way:
 > print exactly which store needs you and which page to open — it will not
 > quietly return an empty file.
 
-**Why a Claude subscription is needed:** a store's real coupon list exists only
+**Why scanning happens in your browser:** a store's real coupon list exists only
 inside your signed-in session, and the pages that show it are JavaScript apps
 that block plain scripts outright. There is no public feed to read. Rather than
 scrape third-party coupon blogs -- which are noisy, often wrong, and not the
 store's own numbers -- this project reads the genuine article: the page you
 already have open, in your own browser, with your own account. That is what the
-Claude for Chrome extension does.
+Scanner extension does (and Claude for Chrome, for stores the Scanner does not
+know yet).
 
 A useful side effect: **this program has no network access at all.** It cannot
 contact a store, so it cannot be blocked, rate-limited, or quietly scrape
@@ -209,12 +210,12 @@ The easiest way to use this. One command:
 python3 panel.py
 ```
 
-or double-click **Start Panel.command** -- or just press **Scan with
-Claude...** in the desktop app, which starts it for you. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
+or double-click **Start Panel.command** -- or just press **Scan
+Deals...** in the desktop app, which starts it for you. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
-- **Scan with Claude** -- pick a store, Claude reads its deals from the page
-  you are signed in to, and the panel offers to import the result.
+- **Scan deals** -- pick a store, the Scanner extension (or Claude) reads its
+  deals from your own browser, and the panel offers to import the result.
 - **Your daily target** -- calories and macros sized to you, editable any time.
 - **Refresh Deals** -- checks every enabled store and writes the XML.
 - **How to Import** -- step-by-step import instructions in a popup.
@@ -228,9 +229,78 @@ nothing uploaded anywhere -- with:
 
 <p align="center"><em>Refresh, see what matched, import. That's the loop.</em></p>
 
+The panel runs only while its page is open. Close the tab or navigate away and
+it stops a few seconds later -- the page holds one open connection to the panel
+and nothing is sent on a timer, so there is no heartbeat to keep it alive. A
+reload reconnects well inside that grace. A scan in progress holds it open.
+
+### Scan with the Scanner extension
+
+The Scanner is a small Chrome extension in `extension/`. It does the scan
+itself -- no instruction to copy, no subscription. Load it once:
+
+1. Open `chrome://extensions` (Edge: `edge://extensions`) and switch on
+   **Developer mode**.
+2. Press **Load unpacked** and choose the `extension/` folder of this project.
+
+Installed the app from the disk image instead? The Scanner ships inside it:
+in the app, **Scan Deals... -> Set Up Scanner...** puts it in
+`~/Library/Application Support/Wellness Smart Shopping/Scanner Extension`,
+shows that folder in Finder and walks you through the same two steps. The app
+refreshes that folder whenever it is updated; press the reload arrow on the
+Scanner in the extensions page to pick up the new version.
+
+(`python3 installer.py` checks for it and shows these steps if it is missing.)
+Then, in the panel, **Scan deals** -> pick a store. The Scanner opens the store
+in a tab, reads every offer, hands them to the panel and closes the tab again;
+the panel matches them and offers to import, exactly as below.
+
+- **It only reads.** It never loads, clips or buys anything. The one button
+  it ever presses is a list's own "Load More" (Stew's), and it refuses anything
+  that looks like a cart, coupon, account or store-choice control. Tests
+  enforce both.
+- **It checks itself.** ShopRite's scanner compares what it read against the
+  page's own "All Coupons (N)" and "Limit 4 Offers (N)" counts. If they differ
+  it stops and says so rather than saving part of the list.
+- **Its reach is small:** the stores it knows, and `127.0.0.1` to reach the
+  panel. The toolbar button scans any other page you point it at.
+- **It works without the panel.** Press the toolbar button on a store page:
+  if the panel is not running, the offers are shown there to copy.
+
+Each store has a **site file** in `extension/sites/`: ShopRite, Stew Leonard's
+and Costco have their own; any other store uses `generic.js`, which reads
+anything shaped like an offer with a price. Set `"adapter"` on a store in
+`config.json` to choose one. When a store changes its page, its site file is
+the one file to fix, and every scan leaves a report saying which step and
+selector broke: see [`extension/sites/README.md`](extension/sites/README.md).
+Tests: `node --test extension/test/*.test.js`.
+
+| Store | What the Scanner reads | Before you shop |
+| --- | --- | --- |
+| ShopRite | the digital coupon list, signed out | **Log in and load each coupon to your account** (shoprite.com -> Digital Coupons -> Load to Card). You must be logged in, because it's the only way to load coupons to your account; a coupon you skip rings up at the regular price. |
+| Stew Leonard's | this week's specials in Stew's online shop (the flyer itself is only images). Checked against the printed flyer: every discounted item is there except a handful of non-staples; the flyer's other entries are featured everyday prices or points rewards. | nothing to clip - they are the week's prices, and the result links to that specials page. For items marked **APP DEAL**, scan your Member ID in the free Stew Leonard's app (or give your phone number) at checkout, as the flyer says. |
+| Costco | the public warehouse savings page | nothing to clip - Costco calls these *instant savings*. You need an **active membership** in the warehouse; limits are per household, and a few deals are online only. |
+
+Those notes appear wherever you act on the deals: on the scan result in the
+panel (and the toolbar popup), in the app's import preview, and in a boxed
+notice at the top of the shopping list PDF, with **LOAD COUPON FIRST** beside
+each ShopRite item. After a ShopRite scan the panel also lists each matched
+coupon with **Copy name** (for ShopRite's coupon search) and a link to load it.
+
+**Logged in to ShopRite?** The Scanner checks, and if you are not, the panel
+shows a friendly bar at the very top with a **Log in to ShopRite** button
+(**Maybe later** hides it for the session). Once you're logged in, the scan
+result changes its wording from "log in first" to "now load your coupons".
+The check uses Chrome's `cookies` permission to see whether ShopRite's sign-in
+cookie *exists*; it never reads the cookie's value, and a test enforces that.
+
+A store's notes are its `"redeem"` setting in `config.json`, so your own stores
+can have them too.
+
 ### Scan with Claude
 
-**Scan with Claude** runs the whole loop for you. Press it, pick a store, and
+**Scan with Claude** is the fallback for a store the Scanner cannot read yet,
+and runs the whole loop for you. Press it, pick a store, and
 the panel hands you the exact instruction to give Claude:
 
 <p align="center"><img src="docs/img/scan-with-claude.jpg" alt="The Scan with Claude wizard: links to the store's coupon list, three drawn steps, the instruction to give Claude with a Copy button, and a spinner waiting for the scan" width="720"></p>
@@ -310,7 +380,7 @@ its own scraper: it fetched store pages, parsed them, and kept sign-in sessions
 in an embedded browser. That is ~380 lines lighter now, and with it went the
 hard-coded town and store branch the original was built around.
 
-In its place the app has one button, **Scan with Claude...**, opening a small
+In its place the app has one button, **Scan Deals...**, opening a small
 panel that does three things and nothing else:
 
 - **Start Control Panel** finds `panel.py`, starts it, shows progress while it
@@ -319,6 +389,12 @@ panel that does three things and nothing else:
   remembers. Nothing to run by hand.
 - **Import Sales XML...** applies the file a scan produced.
 - **Clear Imported Deals**, and Close.
+
+**Deals come before PDFs.** **Create 3 Paired PDFs...** waits for this week's
+scan: until a sales file has been imported (in the last 7 days), it makes
+nothing, pulses **Scan Deals...** and shows a tip saying to scan first. A scan
+that matched nothing on your list still counts -- the PDFs are then made at
+regular prices. **Clear Imported Deals** clears the scan too.
 
 The per-item list of entry boxes is gone -- deals arrive from a scan, so there
 was nothing left to type into it.
