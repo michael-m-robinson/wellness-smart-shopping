@@ -121,6 +121,11 @@ shop itself. The target updates live as you type, so you can see what switching
 from Maintenance to Cutting, or from Sedentary to Active, actually costs before
 committing.
 
+**Any of the four numbers can be typed over.** Click a figure on the targets
+card, type your own, and it sticks — a link puts the calculated one back. Leave
+a box alone and it keeps calculating, so you can pin protein and let the rest
+follow.
+
 Press **Save targets** and it is written to `profile.json` on your machine and
 reused from then on. Change it any time with **Edit** on the targets card; there
 is no lock-in and nothing is uploaded.
@@ -200,16 +205,15 @@ nothing uploaded anywhere -- with:
 **Scan with Claude** runs the whole loop for you. Press it, pick a store, and
 the panel hands you the exact instruction to give Claude:
 
-<p align="center"><img src="docs/img/scan-with-claude.jpg" alt="The Scan with Claude wizard: links to the store's coupon list and weekly ad, the instruction to give Claude with a Copy button, and a spinner waiting for the scan" width="720"></p>
+<p align="center"><img src="docs/img/scan-with-claude.jpg" alt="The Scan with Claude wizard: links to the store's coupon list, three drawn steps, the instruction to give Claude with a Copy button, and a spinner waiting for the scan" width="720"></p>
 
 1. **Pick a store.** Each one shows whether it has been scanned yet.
-2. **Open it and sign in.** The panel links straight to that store's coupon list
-   and weekly ad.
+2. **Open it and sign in.** The panel links straight to that store's coupon list.
 3. **Give Claude the instruction** (there is a Copy button) in the Chrome side
-   panel, with the Claude for Chrome extension enabled.
-4. **The panel watches for the result.** When Claude saves the scan, it is
-   picked up automatically, matched against your staples, and turned into XML --
-   no further clicking.
+   panel, with the Claude for Chrome extension enabled. The window draws the
+   three steps, so the side panel does not have to be familiar.
+4. **The scan comes straight back.** No file to save: it is matched against
+   your staples and turned into XML with no further clicking.
 5. **It asks whether to import.** Say yes and it opens the app and reveals the
    file in Finder, with the path on your clipboard. Say **Not now** and it tells
    you exactly where the file is waiting, so you can import whenever you like:
@@ -222,6 +226,20 @@ Nothing is lost by declining -- the file keeps until you use **Import Sales
 XML...** in the app. If the scan came through but nothing matched your staples,
 it says so plainly rather than writing an empty file; that is just a quiet week
 at that store.
+
+#### How the scan gets back without touching your files
+
+A browser extension **cannot write to your disk**, so this does not ask it to.
+`browser/harvest.js` runs inside the store's own page, and a page is allowed to
+post to a local address — so it posts the offers to the panel on `127.0.0.1`,
+which writes them where writing is allowed.
+
+Chrome preflights that request, because it comes from a public page to a local
+one, so the panel answers with the headers Chrome asks for, including
+`Access-Control-Allow-Private-Network`. Without that the request never arrives.
+
+If the panel is not running, nothing is lost: the script prints the offers
+instead, and the Scan window has a box to paste them into.
 
 #### If you do not have the extension yet
 
