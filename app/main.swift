@@ -712,6 +712,47 @@ struct SaleSwap {
 // Interchangeable catalog items by role. Swaps only ever happen inside one group, so a
 // protein is only replaced by another protein, a grain by a grain, and so on. Spices and
 // shared-pantry staples are intentionally absent — there's no sensible substitute for them.
+// MARK: - Stores
+
+/// The stores the list can be shopped at, as the checkboxes name them.
+let knownStores = ["BJ's", "Costco", "ShopRite", "Stew Leonard's"]
+
+/// Listed, but the Scanner cannot read their deals yet. Their items are bought
+/// at another store until then (see relocatedStore).
+let comingSoonStores: Set<String> = ["BJ's"]
+
+/// While BJ's is coming soon, where each of its items is bought instead:
+/// fresh staples at ShopRite, bulk and frozen at Costco.
+let relocatedStore: [String: String] = [
+    "eggs": "ShopRite", "snackeggs": "ShopRite", "milk": "ShopRite", "snackmilk": "ShopRite",
+    "chicken": "ShopRite", "sweetpotato": "ShopRite",
+    "oats": "Costco", "blueberries": "Costco", "quinoa": "Costco", "whey": "Costco",
+    "salmon": "Costco", "shrimp": "Costco", "oil": "Costco",
+]
+
+/// "Stew Leonards" (as a sales file writes it) -> "Stew Leonard's".
+func canonicalStore(_ name: String) -> String? {
+    let key = name.lowercased().filter { $0.isLetter }
+    return knownStores.first { $0.lowercased().filter { $0.isLetter } == key }
+}
+
+/// The catalog as it can be shopped: nothing at a coming-soon store, and an
+/// item with a deal bought at the store that has the deal (when you shop there).
+func shoppableCatalog(_ items: [ShoppingItem], dealStores: [String: String],
+                      enabledStores: Set<String>) -> [ShoppingItem] {
+    items.map { item in
+        var store = item.store
+        if comingSoonStores.contains(store) { store = relocatedStore[item.id] ?? "ShopRite" }
+        if let deal = dealStores[item.id].flatMap(canonicalStore), enabledStores.contains(deal) {
+            store = deal
+        }
+        guard store != item.store else { return item }
+        return ShoppingItem(id: item.id, name: item.name, package: item.package, aisle: item.aisle,
+                            store: store, meal: item.meal, monthlyPackages: item.monthlyPackages,
+                            fallbackPrice: item.fallbackPrice, sourceURL: item.sourceURL)
+    }
+}
+
 let substitutionGroups: [[String]] = [
     ["chicken", "turkey", "beef", "salmon", "shrimp", "cod", "tuna"],
     ["greens", "lunchveg", "dinnerveg", "fruit"],
@@ -946,16 +987,26 @@ func adjustedForProfile(_ recipe: Recipe, options: ListOptions) -> Recipe {
     return adjusted
 }
 
-func recipesForPlan(apiRecipes: [Recipe], days: Int, lifestyle: String, options: ListOptions) -> [Recipe] {
+func recipesForPlan(apiRecipes: [Recipe], days: Int, lifestyle: String, options: ListOptions,
+                    preferIDs: Set<String> = []) -> [Recipe] {
     let needed = recipeCountNeeded(for: days)
     var result: [Recipe] = []
-    func score(_ recipe: Recipe) -> Int {
-        // Ranked on the goal only. A discount must not decide what you eat this
-        // week; it gets its say later, as a substitute for something already needed.
-        nutritionGoalScore(recipe, goal: options.nutritionGoal)
+    // Ranked on the nutrition goal first. Among recipes the goal rates the
+    // same, the one using more of this week's on-sale picks wins -- so deals
+    // steer the menu without ever trading away the target.
+    func score(_ recipe: Recipe) -> Int { nutritionGoalScore(recipe, goal: options.nutritionGoal) }
+    func onSale(_ recipe: Recipe) -> Int {
+        guard !preferIDs.isEmpty else { return 0 }
+        return recipe.ingredients.reduce(0) { $0 + catalogItemIDs(forIngredient: $1).intersection(preferIDs).count }
     }
-    let rankedAPI = apiRecipes.filter { recipeMatchesLifestyle($0, lifestyle: lifestyle) }.sorted { score($0) > score($1) }
-    let rankedBuiltIns = builtInRecipes.filter { recipeMatchesLifestyle($0, lifestyle: lifestyle) }.sorted { score($0) > score($1) }
+    func ranked(_ list: [Recipe]) -> [Recipe] {
+        list.filter { recipeMatchesLifestyle($0, lifestyle: lifestyle) }
+            .map { ($0, score($0), onSale($0)) }
+            .sorted { ($0.1, $0.2) > ($1.1, $1.2) }
+            .map { $0.0 }
+    }
+    let rankedAPI = ranked(apiRecipes)
+    let rankedBuiltIns = ranked(builtInRecipes)
     for recipe in rankedAPI where result.count < needed { result.append(recipe) }
     for recipe in rankedBuiltIns where result.count < needed && !result.contains(where: { $0.title == recipe.title }) { result.append(recipe) }
     if result.isEmpty { result = Array(builtInRecipes.prefix(max(1, needed))) }
@@ -1954,7 +2005,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         couponsButton.target = self; couponsButton.action = #selector(manageCoupons(_:)); couponsButton.frame = NSRect(x: 550, y: 518, width: 165, height: 30); couponsButton.bezelStyle = .rounded; view.addSubview(couponsButton)
         updateCouponsButton()
         view.addSubview(label("Stores", frame: NSRect(x: 30, y: 490, width: 90, height: 22)))
-        for (button, x, width) in [(bjs, 130, 70), (costco, 205, 80), (shoprite, 290, 95), (stews, 390, 150)] { button.frame = NSRect(x: x, y: 487, width: width, height: 24); button.state = .on; view.addSubview(button) }
+        for (button, x, width) in [(bjs, 130, 100), (costco, 235, 80), (shoprite, 318, 90), (stews, 410, 130)] { button.frame = NSRect(x: x, y: 487, width: width, height: 24); button.state = .on; view.addSubview(button) }
+        // BJ's is listed but cannot be scanned yet: its items are bought at
+        // ShopRite and Costco meanwhile.
+        bjs.title = "BJ's (soon)"
+        bjs.state = .off
+        bjs.isEnabled = false
+        bjs.toolTip = "BJ's is coming soon - the Scanner can't read BJ's deals yet. Until it can, BJ's items on your list are bought at ShopRite and Costco."
         prioritizeSales.frame = NSRect(x: 545, y: 487, width: 180, height: 24)
         prioritizeSales.toolTip = "Meals and the shopping list are always built from your nutrition target first. With this on, the week's imported offers are then applied to that finished list and cheaper on-sale substitutes are proposed for what is on it."
         view.addSubview(prioritizeSales)
@@ -2052,7 +2109,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     private func chosenStores() -> Set<String> {
         var set = Set<String>()
-        if bjs.state == .on { set.insert("BJ's") }
+        if bjs.state == .on, !comingSoonStores.contains("BJ's") { set.insert("BJ's") }
         if costco.state == .on { set.insert("Costco") }
         if shoprite.state == .on { set.insert("ShopRite") }
         if stews.state == .on { set.insert("Stew Leonard's") }
@@ -2150,7 +2207,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         heading.frame = NSRect(x: 24, y: 206, width: 512, height: 24)
         panel.contentView?.addSubview(heading)
 
-        let note = NSTextField(wrappingLabelWithString: "Start the control panel and scan this week's deals there, with the Scanner extension or Claude. It writes a sales file, which you import here. PDFs are made only after a scan.")
+        let note = NSTextField(wrappingLabelWithString: "Start the control panel and scan this week's deals there. Each scan saves a deal file in Documents > Deals, which you import here. PDFs are made only after a scan.")
         note.frame = NSRect(x: 24, y: 152, width: 512, height: 48)
         note.font = .systemFont(ofSize: 11); note.textColor = .secondaryLabelColor
         panel.contentView?.addSubview(note)
@@ -2285,7 +2342,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         updateCouponsButton()
     }
 
-    private func applyDetectedCoupons(_ matches: [DetectedCoupon], replacingStores: Set<String> = []) {
+    /// Applies offers and reports which ones took. An offer is skipped when the
+    /// list already holds a better deal on the same item.
+    @discardableResult
+    private func applyDetectedCoupons(_ matches: [DetectedCoupon], replacingStores: Set<String> = []) -> (applied: [DetectedCoupon], keptBetter: [DetectedCoupon]) {
+        var applied: [DetectedCoupon] = [], keptBetter: [DetectedCoupon] = []
         let staleIDs = couponSources.compactMap { replacingStores.contains($0.value) ? $0.key : nil }
         for id in staleIDs {
             couponValues.removeValue(forKey: id)
@@ -2301,9 +2362,20 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 couponValues[match.itemID] = min(250, match.savingsPerPackage)
                 couponLimits[match.itemID] = max(1, match.maximumUses)
                 couponSources[match.itemID] = match.store
+                applied.append(match)
+            } else {
+                keptBetter.append(match)
             }
         }
         persistCoupons()
+        return (applied, keptBetter)
+    }
+
+    /// True when every applied offer is really in the saved settings -- the
+    /// confirmation only says "applied" once this checks out.
+    private func dealsWereSaved(_ applied: [DetectedCoupon]) -> Bool {
+        let saved = UserDefaults.standard.dictionary(forKey: "couponSavingsByItem") ?? [:]
+        return applied.allSatisfy { ((saved[$0.itemID] as? NSNumber)?.doubleValue ?? 0) > 0 }
     }
 
     // Scans the given stores' public offer pages. Returns a status message and the set of
@@ -2541,26 +2613,181 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     @objc func importSalesXML(_ sender: Any?) {
         let panel = NSOpenPanel()
         panel.allowedContentTypes = [.xml]
-        panel.allowsMultipleSelection = false
-        panel.prompt = "Import Sales"
-        panel.message = "Choose a sales XML file (catalog itemId + savings or salePrice per offer)."
-        guard panel.runModal() == .OK, let url = panel.url, let data = try? Data(contentsOf: url) else { return }
-        let offers = parseSalesXML(data, items: catalog)
-        // The scan happened, whether or not any of it matched this list.
-        UserDefaults.standard.set(Date(), forKey: dealsScannedAtKey)
+        panel.allowsMultipleSelection = true
+        panel.prompt = "Import Deals"
+        panel.message = "Your deal files are in Documents > Deals. Choose the newest one for each store you shop - hold Command to pick several."
+        // Open where the control panel saves them.
+        if FileManager.default.fileExists(atPath: AppDelegate.dealsFolder.path) {
+            panel.directoryURL = AppDelegate.dealsFolder
+        }
+        guard panel.runModal() == .OK, !panel.urls.isEmpty else { return }
+
+        var offersByItem: [String: DetectedCoupon] = [:]
+        var stores: [String] = []
+        var problems: [String] = []
+        var lastFailure: ImportOutcome?
+        for url in panel.urls {
+            let name = url.lastPathComponent
+            let data: Data
+            do {
+                data = try Data(contentsOf: url)
+            } catch {
+                problems.append("\(name) couldn't be opened")
+                lastFailure = .couldNotRead(name, error.localizedDescription)
+                continue
+            }
+            guard let doc = try? XMLDocument(data: data, options: []) else {
+                problems.append("\(name) isn't a deal file")
+                lastFailure = .notASalesFile(name)
+                continue
+            }
+            // The scan happened, whether or not any of it matched this list.
+            let fileStore = doc.rootElement()?.attribute(forName: "store")?.stringValue ?? ""
+            if let store = canonicalStore(fileStore) {
+                recordScan(of: store)
+                if !stores.contains(store) { stores.append(store) }
+            }
+            UserDefaults.standard.set(Date(), forKey: dealsScannedAtKey)
+            // The best offer per item across every file.
+            for offer in parseSalesXML(data, items: catalog)
+            where offer.savingsPerPackage > (offersByItem[offer.itemID]?.savingsPerPackage ?? 0) {
+                offersByItem[offer.itemID] = offer
+            }
+        }
+        importProblems = problems
+        if stores.isEmpty && offersByItem.isEmpty {
+            confirmImport(panel.urls.count == 1 && lastFailure != nil ? lastFailure!
+                          : .couldNotRead("\(panel.urls.count) files", problems.joined(separator: "; ")))
+            return
+        }
+        let offers = Array(offersByItem.values)
         guard !offers.isEmpty else {
-            couponScanStatus?.stringValue = "No matching offers found in \(url.lastPathComponent). Check the XML uses valid catalog item IDs."
+            confirmImport(.nothingMatched(stores.isEmpty ? "The file" : AppDelegate.listed(stores) + "'s file"))
             return
         }
-        guard let chosen = presentScannedDealsPreview(offers), !chosen.isEmpty else {
-            couponScanStatus?.stringValue = "No offers applied from \(url.lastPathComponent)."
+        guard let chosen = presentScannedDealsPreview(offers) else {
+            couponScanStatus?.stringValue = "Import cancelled - nothing was changed."
             return
         }
-        applyDetectedCoupons(chosen)
-        let total = chosen.reduce(0.0) { $0 + $1.savingsPerPackage }
-        let mustLoad = Set(chosen.map { $0.store }).compactMap { redeemNotice(for: $0) }.filter { $0.mustAct }
-        let reminder = mustLoad.isEmpty ? "" : " Next: log in to ShopRite and load these coupons to your account - it's the only way they come off at the register."
-        couponScanStatus?.stringValue = "Imported \(chosen.count) offer(s) from \(url.lastPathComponent) (est. \(money(total))/package saved). Verify at your store.\(reminder)"
+        guard !chosen.isEmpty else {
+            confirmImport(.noneChosen)
+            return
+        }
+        let result = applyDetectedCoupons(chosen)
+        guard dealsWereSaved(result.applied) else {
+            confirmImport(.couldNotSave)
+            return
+        }
+        confirmImport(.applied(result.applied, keptBetter: result.keptBetter.count))
+    }
+
+    /// Files in the last import that could not be used (shown in its confirmation).
+    private var importProblems: [String] = []
+
+    /// Where the control panel saves sales files (dealcrawler/paths.py DEALS_DIR).
+    static var dealsFolder: URL {
+        FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("Documents/Deals")
+    }
+
+    /// How an import ended, for its confirmation.
+    enum ImportOutcome {
+        case applied([DetectedCoupon], keptBetter: Int)
+        case nothingMatched(String)
+        case noneChosen
+        case couldNotRead(String, String)
+        case notASalesFile(String)
+        case couldNotSave
+    }
+
+    /// Says plainly whether the deals were applied, and what happens next.
+    /// The same words go on the Scan Deals panel's status line.
+    func importConfirmation(_ outcome: ImportOutcome) -> NSAlert {
+        let alert = NSAlert()
+        alert.addButton(withTitle: "OK")
+        switch outcome {
+        case .applied(let applied, let keptBetter):
+            let total = applied.reduce(0.0) { $0 + $1.savingsPerPackage }
+            let count = applied.count
+            alert.alertStyle = .informational
+            alert.messageText = count == 1 ? "Your deal is applied!" : "Your \(count) deals are applied!"
+            var text = "\(count == 1 ? "It's" : "They're") on your list now - about \(money(total)) off per package in all. Your next PDFs will be priced with \(count == 1 ? "it" : "them")."
+            if keptBetter > 0 {
+                text += " \(keptBetter) other\(keptBetter == 1 ? " was" : "s were") left as \(keptBetter == 1 ? "it was" : "they were"): your list already had a better deal."
+            }
+            if Set(applied.map { $0.store }).contains(where: { redeemNotice(for: $0)?.mustAct ?? false }) {
+                text += "\n\nOne more step for ShopRite: log in and load these coupons to your account - it's the only way they come off at the register."
+            }
+            alert.informativeText = text
+            alert.buttons.first?.title = "Great!"
+            alert.icon = Self.outcomeIcon(ok: true)
+        case .nothingMatched(let name):
+            alert.alertStyle = .informational
+            alert.messageText = "No deals applied - nothing matched your list"
+            alert.icon = Self.outcomeIcon(ok: nil)
+            alert.informativeText = "\(name) came through fine, but none of its offers are for food on your list. That's just a quiet week at that store: your PDFs will use regular prices, and you can make them now."
+        case .noneChosen:
+            alert.alertStyle = .informational
+            alert.messageText = "No deals applied"
+            alert.icon = Self.outcomeIcon(ok: nil)
+            alert.informativeText = "Every deal was unchecked, so nothing changed. Import the file again whenever you'd like to add some."
+        case .couldNotRead(let name, let reason):
+            alert.alertStyle = .warning
+            alert.messageText = "Your deals weren't applied"
+            alert.icon = Self.outcomeIcon(ok: false)
+            let why = reason.trimmingCharacters(in: CharacterSet(charactersIn: ". "))
+            alert.informativeText = "We couldn't open \(name) (\(why)). Nothing was changed - try importing it again, or run a fresh scan in the control panel."
+        case .notASalesFile(let name):
+            alert.alertStyle = .warning
+            alert.messageText = "Your deals weren't applied"
+            alert.icon = Self.outcomeIcon(ok: false)
+            alert.informativeText = "\(name) doesn't look like a sales file. Choose one from Documents > Deals, where the control panel saves them after a scan (their names end in -sales-<date>.xml). Nothing was changed."
+        case .couldNotSave:
+            alert.alertStyle = .warning
+            alert.messageText = "Your deals weren't saved"
+            alert.icon = Self.outcomeIcon(ok: false)
+            alert.informativeText = "Something went wrong saving them, so your list may not include them. Please import the file again."
+        }
+        return alert
+    }
+
+    /// Green check for applied, orange warning for not applied, blue info
+    /// for "fine, but nothing to apply".
+    static func outcomeIcon(ok: Bool?) -> NSImage? {
+        let (name, color): (String, NSColor) = ok == true ? ("checkmark.circle.fill", .systemGreen)
+            : ok == false ? ("exclamationmark.triangle.fill", .systemOrange)
+            : ("info.circle.fill", .systemBlue)
+        let config = NSImage.SymbolConfiguration(pointSize: 48, weight: .regular)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [.white, color]))
+        return NSImage(systemSymbolName: name, accessibilityDescription: nil)?
+            .withSymbolConfiguration(config)
+    }
+
+    private func confirmImport(_ outcome: ImportOutcome) {
+        let alert = importConfirmation(outcome)
+        // Say what is still missing, so every checked store gets scanned.
+        var extra: [String] = []
+        switch outcome {
+        case .applied, .nothingMatched, .noneChosen:
+            if !importProblems.isEmpty {
+                extra.append("Couldn't use: " + importProblems.joined(separator: "; ") + ".")
+            }
+            let missing = unscannedStores()
+            if !missing.isEmpty {
+                extra.append("Still to scan: \(AppDelegate.listed(missing)) - your PDFs wait until every store you shop has this week's deals.")
+            }
+        default:
+            break
+        }
+        importProblems = []
+        if !extra.isEmpty { alert.informativeText += "\n\n" + extra.joined(separator: "\n\n") }
+        couponScanStatus?.stringValue = alert.messageText + ". " +
+            alert.informativeText.replacingOccurrences(of: "\n\n", with: " ")
+        if case .applied = outcome { status.stringValue = alert.messageText + " Your next PDFs will be priced with this week's deals." }
+        if let window = couponsPanel ?? window {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
+        }
     }
 
     @objc func clearCoupons(_ sender: Any?) {
@@ -2571,6 +2798,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         UserDefaults.standard.removeObject(forKey: "couponLimitsByItem")
         UserDefaults.standard.removeObject(forKey: "couponSourcesByItem")
         UserDefaults.standard.removeObject(forKey: dealsScannedAtKey)
+        UserDefaults.standard.removeObject(forKey: scansByStoreKey)
         updateCouponsButton()
         couponScanStatus?.stringValue = "Imported deals cleared."
         status.stringValue = "Deals cleared. New reports will use regular estimated prices."
@@ -2644,9 +2872,15 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return
         }
         let options = ListOptions(recipient: "Home", days: days, people: people, budgetMin: min(enteredMin, enteredMax), budgetMax: max(enteredMin, enteredMax), groupByStore: true, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: verifiedSaleItemIDs())
-        let plan = makeShoppingPlan(options: options, items: catalog, prices: priceBook, favorites: favoriteIDs, coupons: couponValues, couponLimits: couponLimits)
+        let shoppable = shoppableCatalog(catalog, dealStores: couponSources, enabledStores: stores)
+        let plan = makeShoppingPlan(options: options, items: shoppable, prices: priceBook, favorites: favoriteIDs, coupons: couponValues, couponLimits: couponLimits)
         let lifestyle = recipeDiet.titleOfSelectedItem ?? "Mediterranean"
-        let queryNames = Array(Array(Set(plan.rows.map { apiIngredientName(for: $0.item) })).filter { $0 != "spices" }.prefix(12))
+        // Search for recipes that use this week's on-sale picks first.
+        let onSale = options.prioritizeSales ? options.saleItemIDs : []
+        let orderedRows = plan.rows.filter { onSale.contains($0.item.id) } + plan.rows.filter { !onSale.contains($0.item.id) }
+        var seenNames = Set<String>()
+        let queryNames = Array(orderedRows.map { apiIngredientName(for: $0.item) }
+            .filter { $0 != "spices" && seenNames.insert($0).inserted }.prefix(12))
         let enteredMealDBKey = mealDBKeyField.stringValue.trimmingCharacters(in: .whitespacesAndNewlines)
         let usesSupporterKey = !enteredMealDBKey.isEmpty
         let mealDBKey = usesSupporterKey ? enteredMealDBKey : "1"
@@ -2706,34 +2940,81 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     }
 
     /// True once this week's deals have been scanned and imported.
-    private var hasFreshScan: Bool {
-        guard let at = UserDefaults.standard.object(forKey: dealsScannedAtKey) as? Date else { return false }
-        return Date().timeIntervalSince(at) < dealsFreshFor
+    private let scansByStoreKey = "dealsScannedByStore"
+
+    /// When each store's deals were last imported.
+    private var scansByStore: [String: Date] {
+        (UserDefaults.standard.dictionary(forKey: scansByStoreKey) ?? [:]).compactMapValues { $0 as? Date }
+    }
+
+    private func recordScan(of store: String) {
+        var scans = scansByStore
+        scans[store] = Date()
+        UserDefaults.standard.set(scans, forKey: scansByStoreKey)
+    }
+
+    /// Checked stores without this week's scan, in checkbox order. PDFs wait
+    /// until this is empty, so every store you shop is priced with its deals.
+    func unscannedStores() -> [String] {
+        let scans = scansByStore
+        return knownStores.filter { chosenStores().contains($0) }.filter { store in
+            guard let at = scans[store] else { return true }
+            return Date().timeIntervalSince(at) >= dealsFreshFor
+        }
+    }
+
+    /// "Costco", "Costco and Stew Leonard's", "BJ's, Costco and ShopRite"
+    static func listed(_ names: [String]) -> String {
+        guard names.count > 1 else { return names.first ?? "" }
+        return names.dropLast().joined(separator: ", ") + " and " + names.last!
     }
 
     /// No PDF without deals: point at the scan button instead.
-    private func nudgeToScan() {
-        let stale = UserDefaults.standard.object(forKey: dealsScannedAtKey) != nil
-        let message = stale
-            ? "Time for a fresh scan! Your deals are over a week old - press Scan Deals... and your PDFs will be priced with this week's savings."
-            : "You could be saving money this week! Press Scan Deals... first - your PDFs are priced with the deals it finds."
+    private func nudgeToScan(_ missing: [String]) {
+        let scans = scansByStore
+        let everScanned = missing.contains { scans[$0] != nil }
+        let message: String
+        if missing.count == chosenStores().count && !everScanned {
+            message = AppDelegate.nudgeFirst
+        } else if missing.allSatisfy({ scans[$0] != nil }) {
+            message = AppDelegate.nudgeStale
+        } else {
+            message = AppDelegate.nudgeMissing(missing)
+        }
         status.stringValue = message
         pulse(couponsButton)
 
         scanNudge?.close()
-        let label = NSTextField(wrappingLabelWithString: message)
-        label.font = .systemFont(ofSize: 12)
-        label.frame = NSRect(x: 12, y: 10, width: 236, height: 40)
         let content = NSViewController()
-        content.view = NSView(frame: NSRect(x: 0, y: 0, width: 260, height: 60))
-        content.view.addSubview(label)
+        content.view = AppDelegate.nudgeView(message)
         let popover = NSPopover()
         popover.contentViewController = content
         popover.contentSize = content.view.frame.size
         popover.behavior = .transient
         popover.show(relativeTo: couponsButton.bounds, of: couponsButton, preferredEdge: .maxY)
         scanNudge = popover
-        DispatchQueue.main.asyncAfter(deadline: .now() + 6) { [weak popover] in popover?.close() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 9) { [weak popover] in popover?.close() }
+    }
+
+    static let nudgeFirst = "You could be saving money this week! Press Scan Deals... first - your PDFs are priced with the deals it finds."
+    static let nudgeStale = "Time for a fresh scan! Your deals are over a week old - press Scan Deals... and your PDFs will be priced with this week's savings."
+    static func nudgeMissing(_ stores: [String]) -> String {
+        "Almost there! \(listed(stores)) still \(stores.count == 1 ? "needs" : "need") this week's scan - press Scan Deals... so every store you shop is priced with its deals."
+    }
+
+    /// The tooltip's content, sized to the message so a longer one is never
+    /// cut off.
+    static func nudgeView(_ message: String) -> NSView {
+        let textWidth: CGFloat = 280
+        let label = NSTextField(wrappingLabelWithString: message)
+        label.font = .systemFont(ofSize: 12)
+        label.preferredMaxLayoutWidth = textWidth
+        let fit = label.sizeThatFits(NSSize(width: textWidth, height: .greatestFiniteMagnitude))
+        let textHeight = ceil(fit.height)
+        label.frame = NSRect(x: 14, y: 12, width: textWidth, height: textHeight)
+        let view = NSView(frame: NSRect(x: 0, y: 0, width: textWidth + 28, height: textHeight + 24))
+        view.addSubview(label)
+        return view
     }
 
     /// A ring that swells and fades around a button, a few times over.
@@ -2766,9 +3047,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
 
     @objc func createPDF(_ sender: Any?) {
         guard !working else { return }
-        // Deals come before PDFs: the list is priced against this week's scan.
-        guard hasFreshScan else {
-            nudgeToScan()
+        // Deals come before PDFs: every checked store needs this week's scan.
+        let missing = unscannedStores()
+        guard missing.isEmpty else {
+            nudgeToScan(missing)
             return
         }
         let useSales = prioritizeSales.state == .on
@@ -2793,37 +3075,6 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         createPDFNow(sender)
     }
 
-    // Preview the proposed on-sale swaps and let the user pick which to apply.
-    // Returns the chosen swaps, an empty array to proceed with no swaps, or nil to cancel.
-    private func presentSaleSwapPreview(_ swaps: [SaleSwap]) -> [SaleSwap]? {
-        let alert = NSAlert()
-        alert.messageText = "Swap in this week's sale items?"
-        let potential = swaps.reduce(0.0) { $0 + $1.estimatedSavings }
-        alert.informativeText = "These optional items can be replaced with on-sale equivalents in the same group. Recipe ingredients and favorites are never touched. Uncheck any you want to keep. Potential savings: \(money(potential))."
-        alert.addButton(withTitle: "Apply Selected Swaps")
-        alert.addButton(withTitle: "Skip Swaps")
-        alert.addButton(withTitle: "Cancel")
-
-        let rowHeight = 24
-        let width = 470
-        let height = min(320, max(1, swaps.count) * rowHeight + 6)
-        let container = NSView(frame: NSRect(x: 0, y: 0, width: width, height: height))
-        var boxes: [(NSButton, SaleSwap)] = []
-        for (index, swap) in swaps.enumerated() {
-            let box = NSButton(checkboxWithTitle: "\(swap.fromName)  →  \(swap.toName)  (\(swap.store)) · save \(money(swap.estimatedSavings))", target: nil, action: nil)
-            box.state = .on
-            box.frame = NSRect(x: 0, y: height - (index + 1) * rowHeight, width: width, height: rowHeight)
-            container.addSubview(box)
-            boxes.append((box, swap))
-        }
-        alert.accessoryView = container
-
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: return boxes.filter { $0.0.state == .on }.map { $0.1 }
-        case .alertSecondButtonReturn: return []
-        default: return nil
-        }
-    }
 
     private func createPDFNow(_ sender: Any?) {
         let days = max(1, min(90, Int(daysField.stringValue) ?? 30))
@@ -2849,12 +3100,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         let saleIDs = verifiedSaleItemIDs()
         let options = ListOptions(recipient: recipient, days: days, people: people, budgetMin: budgetMin, budgetMax: budgetMax, groupByStore: grouping.indexOfSelectedItem == 0, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: saleIDs, saleSources: couponSources)
-        // Recipes must be final before budgeting. Their ingredients become required
-        // shopping rows, then optional groceries are optimized around what remains.
+        // This week's on-sale pick in each category the app tracks: recipes are
+        // chosen with them in mind (the nutrition goal still ranks first), and
+        // each item is listed at the store that has its deal.
+        let onSalePicks = options.prioritizeSales ? saleIDs : []
+        let shoppable = shoppableCatalog(catalog, dealStores: couponSources, enabledStores: stores)
         let lifestyle = recipeDiet.titleOfSelectedItem ?? "Mediterranean"
-        let selectedRecipes = recipesForPlan(apiRecipes: recipes, days: days, lifestyle: lifestyle, options: options)
+        let selectedRecipes = recipesForPlan(apiRecipes: recipes, days: days, lifestyle: lifestyle,
+                                             options: options, preferIDs: onSalePicks)
         let schedule = makeRecipeSchedule(days: days, people: people, recipeCount: selectedRecipes.count)
-        let coverage = recipeShoppingCoverage(recipes: selectedRecipes, options: options)
+        let coverage = recipeShoppingCoverage(recipes: selectedRecipes, options: options, baseItems: shoppable)
         var plan = makeShoppingPlan(
             options: options, items: coverage.items, prices: priceBook, favorites: favoriteIDs,
             coupons: couponValues, couponLimits: couponLimits, requiredItemIDs: coverage.requiredItemIDs
@@ -2866,11 +3121,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 favorites: favoriteIDs, coupons: couponValues, couponLimits: couponLimits,
                 requiredItemIDs: coverage.requiredItemIDs
             )
+            // In each category, the on-sale option replaces the regular one.
+            // Recipe ingredients and favorites are never swapped.
             if !swaps.isEmpty {
-                guard let chosen = presentSaleSwapPreview(swaps) else {
-                    status.stringValue = "List not created — sale swaps were cancelled."
-                    return
-                }
+                let chosen = swaps
                 if !chosen.isEmpty {
                     appliedSwaps = chosen
                     plan = makeShoppingPlan(
@@ -2923,7 +3177,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 swapMessage = ""
             } else {
                 let swapped = appliedSwaps.reduce(0.0) { $0 + $1.estimatedSavings }
-                swapMessage = " Swapped \(appliedSwaps.count) item(s) for on-sale equivalents (est. \(money(swapped)) saved)."
+                let picks = appliedSwaps.map { "\($0.toName) for \($0.fromName)" }.joined(separator: ", ")
+                swapMessage = " On sale this week, so we picked: \(picks) (about \(money(swapped)) saved)."
             }
             status.stringValue = "Created and remembered \(url.lastPathComponent) in \(url.deletingLastPathComponent().lastPathComponent). Recipes were finalized first, and every non-water recipe ingredient is included in the shopping list.\(extras) All filenames stay paired.\(savings)\(saleMessage)\(swapMessage)"
             NSWorkspace.shared.open(url)
@@ -2971,6 +3226,27 @@ extension AppDelegate {
         if let scanPanel {
             manageCoupons(nil)
             try Self.writePNG(of: couponsPanel?.contentView, to: scanPanel)
+        }
+        // The scan-first tooltips, beside the main image: <name>-nudge-first.png, -stale.png.
+        let stem = url.deletingPathExtension().path
+        try Self.writePNG(of: Self.nudgeView(Self.nudgeFirst), to: URL(fileURLWithPath: stem + "-nudge-first.png"))
+        try Self.writePNG(of: Self.nudgeView(Self.nudgeStale), to: URL(fileURLWithPath: stem + "-nudge-stale.png"))
+        // Import confirmations: <name>-import-<outcome>.png
+        let sample = [
+            DetectedCoupon(itemID: "bread", store: "ShopRite", matchedTitle: "Nature's Own Bread",
+                           savingsPerPackage: 1.0, maximumUses: 4, sourceURL: "imported-xml", requiresAccountClip: false),
+            DetectedCoupon(itemID: "pasta", store: "ShopRite", matchedTitle: "Rana Pasta",
+                           savingsPerPackage: 1.5, maximumUses: 1, sourceURL: "imported-xml", requiresAccountClip: false),
+        ]
+        let outcomes: [(String, ImportOutcome)] = [
+            ("applied", .applied(sample, keptBetter: 1)),
+            ("nothing", .nothingMatched("costco-sales-2026-09-21.xml")),
+            ("unreadable", .couldNotRead("stews-sales-2026-09-21.xml", "The file couldn't be opened.")),
+        ]
+        for (tag, outcome) in outcomes {
+            let alert = importConfirmation(outcome)
+            alert.layout()
+            try Self.writePNG(of: alert.window.contentView, to: URL(fileURLWithPath: stem + "-import-\(tag).png"))
         }
     }
 
@@ -3264,6 +3540,25 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
         let fatRange = dailyMealPlans.map { $0.total.fatGrams }
         let calorieRange = dailyMealPlans.map { $0.total.calories }
         fputs("DAILY_MACRO_RANGE C \(carbohydrateRange.min() ?? 0)-\(carbohydrateRange.max() ?? 0)g F \(fatRange.min() ?? 0)-\(fatRange.max() ?? 0)g P \(proteinRange.min() ?? 0)-\(proteinRange.max() ?? 0)g KCAL \(calorieRange.min() ?? 0)-\(calorieRange.max() ?? 0)\n", stderr)
+        // On-sale picks: the goal still ranks recipes first; deals only break ties.
+        let pickedWithDeals = recipesForPlan(apiRecipes: [], days: saleOptions.days, lifestyle: "Mediterranean",
+                                             options: saleOptions, preferIDs: ["beef", "turkey", "rice"])
+        let goalScores = { (list: [Recipe]) in list.map { nutritionGoalScore($0, goal: saleOptions.nutritionGoal) }.sorted() }
+        // Coming-soon stores are never shopped; their items move, and a deal
+        // puts its item at the deal's store.
+        let shopped = shoppableCatalog(catalog, dealStores: ["salmon": "Stew Leonards"],
+                                       enabledStores: ["Costco", "ShopRite", "Stew Leonard's"])
+        guard goalScores(pickedWithDeals) == goalScores(saleRecipes),
+              !shopped.contains(where: { comingSoonStores.contains($0.store) }),
+              shopped.count == catalog.count,
+              shopped.first(where: { $0.id == "eggs" })?.store == "ShopRite",
+              shopped.first(where: { $0.id == "oats" })?.store == "Costco",
+              shopped.first(where: { $0.id == "salmon" })?.store == "Stew Leonard's",
+              canonicalStore("Stew Leonards") == "Stew Leonard's",
+              AppDelegate.listed(["Costco", "ShopRite", "Stew Leonard's"]) == "Costco, ShopRite and Stew Leonard's" else {
+            throw NSError(domain: "SelfTest", code: 21, userInfo: [NSLocalizedDescriptionKey: "On-sale picks or store handling failed."])
+        }
+        fputs("SELF_TEST_SALE_PICKS_OK\n", stderr)
         try RecipePDFWriter().write(to: recipeTarget, options: saleOptions, recipes: testRecipes, schedule: testSchedule, lifestyle: "Mediterranean", nutritionGoal: saleOptions.nutritionGoal, shoppingListFilename: target.lastPathComponent)
         fputs("SELF_TEST_RECIPES_OK\n", stderr)
         try DailyMealsPDFWriter().write(to: dailyMealsTarget, options: saleOptions, plans: dailyMealPlans, lifestyle: "Mediterranean", shoppingListFilename: target.lastPathComponent)

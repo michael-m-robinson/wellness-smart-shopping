@@ -1,81 +1,68 @@
 <h1>Wellness Smart Shopping</h1>
 
 [![Version](https://img.shields.io/badge/version-1.1.0-3f7d4f)](https://github.com/michael-m-robinson/wellness-smart-shopping/releases)
-[![Platform](https://img.shields.io/badge/platform-macOS%20%7C%20Linux%20%7C%20Windows-555)](#what-you-need)
-[![Desktop app](https://img.shields.io/badge/desktop%20app-macOS%2013%2B-000)](#the-companion-desktop-app)
+[![Desktop app](https://img.shields.io/badge/desktop%20app-macOS%2013%2B-000)](#the-desktop-app)
 [![Python](https://img.shields.io/badge/python-3.9%2B-3776ab)](#what-you-need)
 [![License](https://img.shields.io/badge/license-MIT-blue)](LICENSE)
-[![Mobile](https://img.shields.io/badge/mobile-coming%20soon-orange)](#whats-next)
 
-**Build the shopping list your nutrition targets call for — then let this
-week's grocery sales pay for it.**
+**Build the shopping list your nutrition targets call for -- priced around this
+week's grocery deals.**
 
-The [companion desktop app](#the-companion-desktop-app) plans your meals and
-your list from your calorie and macro targets at ordinary shelf prices. Only
-once that list exists does Wellness Smart Shopping go looking: it reads the
-weekly deals, digital coupons and instant savings from the store pages **you**
-are signed in to, matches them against what the list already asks for, and
-writes a small XML file. Import it and the app prices your trip against those
-offers and proposes cheaper on-sale substitutes for the optional items.
-
-> **Free and open source.** Bring your own stores and your own accounts.
-> Nothing here is tied to one household, one store or one region.
-
-> 📱 **A mobile version is coming soon.**
+Scan the deals at the stores you shop, and the desktop app builds your meal
+plan and shopping list around them: in each food category it picks the option
+that is on sale this week, while your calorie and macro targets still come
+first. A small browser extension reads the deals, a local control panel turns
+them into a deal file, and the app turns that into three printable PDFs -- a
+shopping list, recipes, and a daily meal plan.
 
 ---
 
-## Where this came from
+## A personal project
 
-This started as a personal app. One household, one set of stores, one weekly
-meal plan, built to answer a question that kept coming up: *what should we
-actually buy this week so we eat well without overspending?*
+This is a personal project. It was built for one household, one weekly shop and
+one set of stores -- **ShopRite, Stew Leonard's and Costco**, with BJ's to come
+-- to answer a question that kept coming up: *what should we actually buy this
+week so we eat well without overspending?*
 
-It worked. And the more it worked, the more it seemed selfish to keep it on one
-laptop. Plenty of people find the weekly shop genuinely hard -- not because they
-do not know what good food looks like, but because planning it, pricing it and
-timing it around what happens to be on sale is a real chore every single week.
-That is the part a computer should be doing.
+**Grocery stores from around the US will not be added.** The Scanner reads
+exactly the stores above, each with a reader written for its own pages, and
+that is where it will stay. The code is open and MIT-licensed, so if your
+stores are different you are welcome to fork it and write readers for them --
+`extension/sites/README.md` explains how -- but that work will not happen here.
 
-So it has been generalised and given away. Nothing is tied to one family, one
-region or one set of stores any more: you bring your own stores, your own
-accounts, your own wording and your own look. If it helps you get the right
-food into the house each week with less effort, that is the whole point.
+It is shared in the hope that it helps someone. Planning a week of healthy food,
+pricing it and timing it around what happens to be on sale is a real chore, and
+if some of this saves you part of that chore, it has done its job.
 
 ---
 
-## Why this exists
+## How it works
 
-Eating well is rarely a knowledge problem. Most people already know they should
-buy more lean protein, more produce, more whole grains. The problem is that
-those foods look expensive at the shelf, sales change every week, and the deals
-that *would* make a healthy basket affordable are scattered across a paper
-circular, a digital-coupon list behind a login, and an instant-savings booklet.
-
-So the usual thing happens: you shop by habit, the healthy items get cut when
-the total climbs, and the cheap calories stay in the cart.
-
-This tool closes that gap.
+1. **Scan this week's deals.** In the control panel, **Scan deals -> Scan all my
+   stores** runs the Scanner extension on each store in turn. It reads every
+   offer from the store's own page and matches it against the food the app
+   plans with. Each store's matches are saved as a deal file in
+   **Documents > Deals**.
+2. **Import them into the app.** **Scan Deals... -> Import Sales XML...** takes
+   all of this week's files at once and confirms what it applied.
+3. **Create the PDFs.** The app picks the on-sale option in each category,
+   prefers recipes that use those picks, and prices the list against the deals.
+   It won't make PDFs until every store you have checked has this week's scan.
 
 - **It looks for deals on the food you actually want to eat.** The matcher only
-  recognises staples — lean ground turkey, chicken breast, eggs, plain Greek
-  yogurt, lentils, frozen fish, oats, brown rice, produce, olive oil, spices. A
-  sale on candy, soda or snack bars is deliberately ignored, so a "good week"
-  never means a week of junk.
-- **It makes the healthy option the cheap option.** When the app knows chicken
-  breast is $1.99/lb and lentils are on sale, it can build the same week of
-  meals for less — instead of you discovering the deal after you have already
-  bought something else.
-- **It protects the nutrition targets.** The XML only adjusts *prices and
-  limits*. The app still plans to your calorie and macro goals; a deal can
-  change which protein you buy, not whether you hit your protein.
-- **It looks for deals last, on purpose.** Your recipes and your list are
-  settled before a single offer is read, so what goes in the basket is decided
-  by what you need. A deal then lowers what you pay for those items, or offers
-  a swap inside the same role — turkey for beef, quinoa for rice — that you
-  approve item by item. Plan the week around the circular instead and you end
-  up eating the circular. Build the list with the deals turned off and turned
-  on and you get the same list; only the price changes.
+  recognises staples -- lean ground turkey, chicken breast, eggs, plain Greek
+  yogurt, lentils, fish, oats, brown rice, produce, olive oil, spices. A sale on
+  candy, soda, clothing or shampoo is ignored, so a "good week" never means a
+  week of junk.
+- **Your target comes first.** In each category the app tracks (proteins, grains
+  and starches, produce, beans, dairy, eggs, bread, breakfast) it picks the
+  option on sale -- turkey instead of beef, rice instead of quinoa -- and
+  recipes that use those picks are preferred. But recipes are ranked on your
+  nutrition goal first; a deal only decides between recipes the goal rates the
+  same, so you never trade macros for a coupon. Recipe ingredients and your
+  favorites are never swapped.
+- **Each item is listed where its deal is.** If Stew's has the salmon on sale,
+  the salmon is on your Stew's list.
 - **It respects purchase limits.** "Limit 4" is carried into the file, so the
   savings you are shown are savings you can really get at the register.
 - **It is honest about what a deal is worth.** A `$3.99/lb` advertisement is
@@ -83,58 +70,19 @@ This tool closes that gap.
   a discount larger than the item's normal price is capped instead of being
   taken at face value.
 
-The result: a weekly shop where the produce and lean protein survive the budget
-cut, because the numbers are on their side.
-
 ---
 
 ## What you need
 
-**Two routes. Terminal is the one to start with.**
-
-| Route | What you run | |
-| --- | --- | --- |
-| **Terminal** — recommended | `python3 panel.py` | Everything lives in one folder you can see: your config, your scans, the sales file. Nothing to find, nothing to permit. |
-| **Desktop app** | Drag it in, press **Scan Deals** | Adds meal plans, recipes and PDFs. Keeps its files in `~/Library/Application Support/`, away from the folder you are working in. |
-
-Both open the same control panel and produce the same file, and the scan
-instruction is identical either way.
-
-**Why Terminal first.** The app is a normal macOS app, so it keeps its data in
-Application Support rather than beside the project. That is correct for an
-installed app, but it puts your scans and sales files somewhere other tools —
-including Claude Code — may not be allowed to reach, and a blocked read there
-looks like the scan failing rather than a permission being missing. From
-Terminal, everything sits in the folder you cloned, which sidesteps that
-entirely. Use the app when you want the meal planning and the PDFs.
-
-Then, either way:Then, either way:
-
 | Requirement | Why |
 | --- | --- |
-| **[The Scanner extension](#scan-with-the-scanner-extension)** | The easy way to scan. It ships in `extension/`; load it into Chrome once. No subscription. |
-| **[Claude for Chrome](https://chromewebstore.google.com/detail/fcoeoabgfenejglbffodgkkbkcdhcgfn)** + a Claude subscription | Optional. The fallback for a store the Scanner cannot read yet. |
-| **Python 3.9+** | The control panel and crawler. macOS ships it; standard library only, nothing to install. |
-| **Chrome, signed in to your stores** | Digital coupons only exist inside your own logged-in session. Edge, Brave and Arc count too. |
-| No network access of its own | This program never contacts a store. A test enforces it. |
+| **A Mac** (macOS 13+) | For the desktop app, which makes the plan and the PDFs. The control panel also runs anywhere Python does. |
+| **Python 3.9+** | The control panel. macOS ships it; standard library only, nothing to install. |
+| **Chrome or Edge** | To run the [Scanner extension](#the-scanner-extension). Brave and Arc work too. |
+| **A ShopRite account** | Only to *use* ShopRite's digital coupons: they must be loaded to your account before you shop. The Scanner itself needs no sign-in anywhere. |
 
-> **Please sign in to your stores before crawling.** Most grocers serve deals
-> only to a signed-in session. If you are signed out, the crawler will stop and
-> print exactly which store needs you and which page to open — it will not
-> quietly return an empty file.
-
-**Why scanning happens in your browser:** a store's real coupon list exists only
-inside your signed-in session, and the pages that show it are JavaScript apps
-that block plain scripts outright. There is no public feed to read. Rather than
-scrape third-party coupon blogs -- which are noisy, often wrong, and not the
-store's own numbers -- this project reads the genuine article: the page you
-already have open, in your own browser, with your own account. That is what the
-Scanner extension does (and Claude for Chrome, for stores the Scanner does not
-know yet).
-
-A useful side effect: **this program has no network access at all.** It cannot
-contact a store, so it cannot be blocked, rate-limited, or quietly scrape
-anything on your behalf. It only ever reads a file you saved.
+Everything runs on your own machine. The panel and the app never fetch a store
+page; the Scanner reads the stores' pages in your own browser.
 
 ---
 
@@ -204,217 +152,136 @@ tests pinning both paths.
 
 ## The control panel
 
-The easiest way to use this. One command:
+The hub for scanning. Start it from the desktop app (**Scan Deals... -> Start
+Control Panel**), or from a clone with:
 
 ```bash
 python3 panel.py
 ```
 
-or double-click **Start Panel.command** -- or just press **Scan
-Deals...** in the desktop app, which starts it for you. It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
+It opens a small page at `http://127.0.0.1:8765` -- entirely on your machine,
 nothing uploaded anywhere -- with:
 
-- **Scan deals** -- pick a store, the Scanner extension (or Claude) reads its
-  deals from your own browser, and the panel offers to import the result.
+- **Scan deals** -- scan one store, or **Scan all my stores** in one go.
+- **"You could be saving money this week"** -- a friendly note at the top until
+  a scan this week has found a deal for your list. Its button starts a scan.
 - **Your daily target** -- calories and macros sized to you, editable any time.
-- **Refresh Deals** -- checks every enabled store and writes the XML.
-- **How to Import** -- step-by-step import instructions in a popup.
-- **A sign-in panel** -- any store that needs an account is listed with a link
-  to open it and instructions for the browser harvest.
-- **A look picker** -- 26 bundled images, or drop your own into `themes/`.
-- **Wording** -- edit the app name, greeting, tagline, headings and the
-  shopping list message; all save straight to `branding.json`.
+- **How to Import** -- the steps, and the folder your deal files are in.
+- **A look picker** and **Wording** -- the banner image and every greeting and
+  heading, saved to `branding.json`.
 
-<p align="center"><img src="docs/img/control-panel.jpg" alt="The control panel: banner with a custom greeting, Refresh Deals and How to Import buttons, matched deals, and a theme picker" width="820"></p>
+<p align="center"><img src="docs/img/control-panel.jpg" alt="The control panel: banner with a custom greeting, the scan and import buttons, matched deals, and a theme picker" width="820"></p>
 
-<p align="center"><em>Refresh, see what matched, import. That's the loop.</em></p>
+After each scan the panel shows what it found for your list, what the store
+needs from you before you shop (below), and where the deal file was saved. A
+store with nothing for your list this week still gets its file, so the app
+knows it was scanned.
 
 The panel runs only while its page is open. Close the tab or navigate away and
 it stops a few seconds later -- the page holds one open connection to the panel
-and nothing is sent on a timer, so there is no heartbeat to keep it alive. A
-reload reconnects well inside that grace. A scan in progress holds it open.
+and nothing is sent on a timer. A reload reconnects well inside that grace, and
+a scan in progress holds it open.
 
-### Scan with the Scanner extension
+### Before you shop
 
-The Scanner is a small Chrome extension in `extension/`. It does the scan
-itself -- no instruction to copy, no subscription. Load it once:
+| Store | What the Scanner reads | What you need to do |
+| --- | --- | --- |
+| ShopRite | the digital coupon list | **Log in and load each coupon to your account** (shoprite.com -> Digital Coupons -> Load to Card). You must be logged in, because it's the only way to load coupons to your account; a coupon you skip rings up at the regular price. |
+| Stew Leonard's | this week's specials in Stew's online shop (the printed flyer is only images; the online list carries all its sale items bar a handful of non-staples) | Nothing to clip -- they are the week's prices. For anything the flyer marks **APP DEAL**, scan your Member ID in the free Stew Leonard's app (or give your phone number) at checkout. |
+| Costco | the public warehouse savings page, grocery department only | Nothing to clip -- Costco calls these *instant savings*. You need an **active membership** in the warehouse; limits are per household, and a few deals are online only. |
+
+These notes appear wherever you act on the deals: on the scan result, in the
+app's import confirmation, and in a boxed notice at the top of the shopping list
+PDF, with **LOAD COUPON FIRST** beside each ShopRite item. After a ShopRite scan
+the panel also lists each coupon to load, with **Copy name** for ShopRite's
+coupon search and a link to load it; if the Scanner can see you are logged in
+to ShopRite, it says so and gets straight to the coupons. (It checks only that
+ShopRite's sign-in cookie *exists*, never its value.)
+
+---
+
+## The Scanner extension
+
+A small Chrome/Edge extension that reads each store's deals and hands them to
+the panel. Load it once:
 
 1. Open `chrome://extensions` (Edge: `edge://extensions`) and switch on
    **Developer mode**.
-2. Press **Load unpacked** and choose the `extension/` folder of this project.
+2. Press **Load unpacked** and choose the extension folder: `extension/` in a
+   clone, or -- if you installed the app from the disk image -- the folder the
+   app makes for you with **Scan Deals... -> Set Up Scanner...**
+   (`~/Library/Application Support/Wellness Smart Shopping/Scanner Extension`,
+   shown in Finder). The app refreshes that folder when it is updated; press the
+   reload arrow on the Scanner in the extensions page to pick up a new version.
 
-Installed the app from the disk image instead? The Scanner ships inside it:
-in the app, **Scan Deals... -> Set Up Scanner...** puts it in
-`~/Library/Application Support/Wellness Smart Shopping/Scanner Extension`,
-shows that folder in Finder and walks you through the same two steps. The app
-refreshes that folder whenever it is updated; press the reload arrow on the
-Scanner in the extensions page to pick up the new version.
+Then scan from the panel. The Scanner opens each store in a tab, reads every
+offer, files it with the panel and closes the tab again. Leave the tab in front
+while it works -- stores stop loading lists in background tabs.
 
-(`python3 installer.py` checks for it and shows these steps if it is missing.)
-Then, in the panel, **Scan deals** -> pick a store. The Scanner opens the store
-in a tab, reads every offer, hands them to the panel and closes the tab again;
-the panel matches them and offers to import, exactly as below.
-
-- **It only reads.** It never loads, clips or buys anything. The one button
-  it ever presses is a list's own "Load More" (Stew's), and it refuses anything
+- **It only reads.** It never loads, clips or buys anything. The one button it
+  ever presses is a list's own "Load More" (Stew's), and it refuses anything
   that looks like a cart, coupon, account or store-choice control. Tests
   enforce both.
-- **It checks itself.** ShopRite's scanner compares what it read against the
-  page's own "All Coupons (N)" and "Limit 4 Offers (N)" counts. If they differ
-  it stops and says so rather than saving part of the list.
-- **Its reach is small:** the stores it knows, and `127.0.0.1` to reach the
-  panel. The toolbar button scans any other page you point it at.
-- **It works without the panel.** Press the toolbar button on a store page:
-  if the panel is not running, the offers are shown there to copy.
+- **It checks itself.** ShopRite's reader compares what it read against the
+  page's own "All Coupons (N)" and "Limit 4 Offers (N)" counts; every reader has
+  a minimum and a limit on unreadable cards. If a check fails it says so rather
+  than saving part of the list.
+- **It says what broke.** Every run leaves a report in the panel's data folder
+  (`scanner/<store>.json`) naming the step and selector that failed, so when a
+  store changes its page the fix is quick. The toolbar popup's **Site checks**
+  run a store without filing anything.
 
-Each store has a **site file** in `extension/sites/`: ShopRite, Stew Leonard's
-and Costco have their own; any other store uses `generic.js`, which reads
-anything shaped like an offer with a price. Set `"adapter"` on a store in
-`config.json` to choose one. When a store changes its page, its site file is
-the one file to fix, and every scan leaves a report saying which step and
-selector broke: see [`extension/sites/README.md`](extension/sites/README.md).
-Tests: `node --test extension/test/*.test.js`.
+Each store has one file in `extension/sites/`; the rest is a shared engine.
+[`extension/sites/README.md`](extension/sites/README.md) explains the format
+and how to fix a store when its page changes. Tests:
+`node --test extension/test/*.test.js`.
 
-| Store | What the Scanner reads | Before you shop |
-| --- | --- | --- |
-| ShopRite | the digital coupon list, signed out | **Log in and load each coupon to your account** (shoprite.com -> Digital Coupons -> Load to Card). You must be logged in, because it's the only way to load coupons to your account; a coupon you skip rings up at the regular price. |
-| Stew Leonard's | this week's specials in Stew's online shop (the flyer itself is only images). Checked against the printed flyer: every discounted item is there except a handful of non-staples; the flyer's other entries are featured everyday prices or points rewards. | nothing to clip - they are the week's prices, and the result links to that specials page. For items marked **APP DEAL**, scan your Member ID in the free Stew Leonard's app (or give your phone number) at checkout, as the flyer says. |
-| Costco | the public warehouse savings page | nothing to clip - Costco calls these *instant savings*. You need an **active membership** in the warehouse; limits are per household, and a few deals are online only. |
+---
 
-Those notes appear wherever you act on the deals: on the scan result in the
-panel (and the toolbar popup), in the app's import preview, and in a boxed
-notice at the top of the shopping list PDF, with **LOAD COUPON FIRST** beside
-each ShopRite item. After a ShopRite scan the panel also lists each matched
-coupon with **Copy name** (for ShopRite's coupon search) and a link to load it.
+## The desktop app
 
-**Logged in to ShopRite?** The Scanner checks, and if you are not, the panel
-shows a friendly bar at the very top with a **Log in to ShopRite** button
-(**Maybe later** hides it for the session). Once you're logged in, the scan
-result changes its wording from "log in first" to "now load your coupons".
-The check uses Chrome's `cookies` permission to see whether ShopRite's sign-in
-cookie *exists*; it never reads the cookie's value, and a test enforces that.
+The app plans the meals, builds the list and makes three paired PDFs: a
+low-ink **shopping list** with checkboxes, **recipes**, and a **daily meal
+plan** sized to your targets.
 
-A store's notes are its `"redeem"` setting in `config.json`, so your own stores
-can have them too.
+- **Scan Deals...** opens a small panel: **Start Control Panel** (starts the
+  panel and opens it in your browser, and stops it when you quit), **Import
+  Sales XML...** (opens in Documents > Deals and takes several files at once),
+  **Set Up Scanner...**, and **Clear Imported Deals**.
+- **Every import ends with a confirmation** -- a green check and what was
+  applied, a blue note when nothing matched your list, or an orange warning
+  saying why nothing was applied.
+- **Deals come before PDFs, from every store you shop.** **Create 3 Paired
+  PDFs...** waits until each checked store has a scan from the last 7 days.
+  Until then it pulses **Scan Deals...** and a tip names the stores still to
+  scan.
+- **BJ's is coming soon.** It is listed but greyed out, because the Scanner
+  can't read BJ's deals yet. Until it can, BJ's items are bought at ShopRite
+  (eggs, milk, chicken, sweet potatoes) and Costco (bulk and frozen).
+- **Match Recipes to This List** looks up recipes on TheMealDB, searching for
+  this week's on-sale items first. A free key is built in.
 
-### Scan with Claude
-
-**Scan with Claude** is the fallback for a store the Scanner cannot read yet,
-and runs the whole loop for you. Press it, pick a store, and
-the panel hands you the exact instruction to give Claude:
-
-<p align="center"><img src="docs/img/scan-with-claude.jpg" alt="The Scan with Claude wizard: links to the store's coupon list, three drawn steps, the instruction to give Claude with a Copy button, and a spinner waiting for the scan" width="720"></p>
-
-1. **Pick a store.** Each one shows whether it has been scanned yet.
-2. **Open it and sign in.** The panel links straight to that store's coupon list.
-3. **Give Claude the instruction** (there is a Copy button) in the Chrome side
-   panel, with the Claude for Chrome extension enabled. The window draws the
-   three steps, so the side panel does not have to be familiar.
-4. **The scan comes straight back.** No file to save: it is matched against
-   your staples and turned into XML with no further clicking.
-5. **It asks whether to import.** Say yes and it opens the app and reveals the
-   file in Finder, with the path on your clipboard. Say **Not now** and it tells
-   you exactly where the file is waiting, so you can import whenever you like:
-
-```
-/path/to/wellness-smart-shopping/out/shoprite-sales-2026-09-20.xml
-```
-
-Nothing is lost by declining -- the file keeps until you use **Import Sales
-XML...** in the app. If the scan came through but nothing matched your staples,
-it says so plainly rather than writing an empty file; that is just a quiet week
-at that store.
-
-#### How the scan gets back without touching your files
-
-A browser extension **cannot write to your disk**, so this does not ask it to.
-`browser/harvest.js` runs inside the store's own page, and a page is allowed to
-post to a local address — so it posts the offers to the panel on `127.0.0.1`,
-which writes them where writing is allowed.
-
-Chrome preflights that request, because it comes from a public page to a local
-one, so the panel answers with the headers Chrome asks for, including
-`Access-Control-Allow-Private-Network`. Without that the request never arrives.
-
-If the panel is not running, nothing is lost: the script prints the offers
-instead, and the Scan window has a box to paste them into.
-
-#### If you do not have the extension yet
-
-The panel says so on arrival, with a link to install it:
-
-> **Scanning needs the Claude for Chrome extension** -- Scan with Claude reads
-> deals from the store page you are signed in to, which the Claude for Chrome
-> extension makes possible. Everything else here works without it.
-> &nbsp; [Get the extension] &nbsp; [I already have it]
-
-Press **I already have it** and the notice never comes back. Open the panel in a
-browser that cannot run the extension and it says that instead.
-
-A web page cannot truly detect an installed extension -- the resources this one
-exposes are content-hashed and change with every release, so probing for them
-would start reporting "missing" after any update. The notice therefore informs
-rather than claims, and is dismissible. Only the browser itself is detected with
-certainty.
-
-**How to Scan** (inside the wizard) has the same directions in longhand if you
-would rather read them first.
-
-### The desktop app
-
-The app's Swift source is in `app/`, so it builds from source:
+Build it from source with the Swift toolchain from the Xcode command line tools
+(`xcode-select --install`):
 
 ```bash
 cd app
 ./build.sh                      # -> build/Wellness Smart Shopping.app
-./build.sh "My Shopping App"    # or under your own name
+./make_dmg.sh                   # -> dist/Wellness Smart Shopping.dmg
 ```
 
-Needs the Swift toolchain from the Xcode command line tools
-(`xcode-select --install`). macOS only. The build names the bundle, sets its
-identifier, copies in the theme you picked in the control panel, and ad-hoc
-signs it so macOS will open it.
-
-**The coupon finder is gone.** Not relabelled -- deleted. The old build shipped
-its own scraper: it fetched store pages, parsed them, and kept sign-in sessions
-in an embedded browser. That is ~380 lines lighter now, and with it went the
-hard-coded town and store branch the original was built around.
-
-In its place the app has one button, **Scan Deals...**, opening a small
-panel that does three things and nothing else:
-
-- **Start Control Panel** finds `panel.py`, starts it, shows progress while it
-  comes up, opens your browser on it, and **stops it again when you quit the
-  app**. If it cannot find the folder it asks you to point at it once, then
-  remembers. Nothing to run by hand.
-- **Import Sales XML...** applies the file a scan produced.
-- **Clear Imported Deals**, and Close.
-
-**Deals come before PDFs.** **Create 3 Paired PDFs...** waits for this week's
-scan: until a sales file has been imported (in the last 7 days), it makes
-nothing, pulses **Scan Deals...** and shows a tip saying to scan first. A scan
-that matched nothing on your list still counts -- the PDFs are then made at
-regular prices. **Clear Imported Deals** clears the scan too.
-
-The per-item list of entry boxes is gone -- deals arrive from a scan, so there
-was nothing left to type into it.
-
-> **The app carries its own copy of the control panel**, so an app installed
-> from the disk image works wherever you put it. It falls back to a folder you
-> picked before, then the usual clone locations, and asks once if it cannot find
-> any. **Python 3 is the one thing it needs** -- macOS ships it -- and without it
-> the button cannot start anything, though the rest of the app still works and
-> you can import a sales file by hand.
-
-What survived untouched: the meal planner, recipes, PDF export, nutrition
-targets, and the XML import. The app's own self-test still passes:
+The app carries its own copy of the control panel, so an app installed from
+the disk image works wherever you put it. **Python 3 is the one thing it
+needs.** Its self-test builds all three PDFs and checks the planning rules:
 
 ```bash
 "build/Wellness Smart Shopping.app/Contents/MacOS/SmartShoppingList" \
     --self-test /tmp/a.pdf /tmp/b.pdf /tmp/c.pdf
 ```
 
-Tests in `test_crawler.py` guard the removal, so the scraper cannot creep back.
+---
+
+## Make it yours
 
 ### Make it sound like you
 
@@ -490,27 +357,15 @@ icon, backs up first, and re-signs so macOS still opens it. macOS only.
 
 ## Install
 
-**The easy way — a disk image, drag to Applications.**
+**The easy way -- a disk image.** Open `Wellness Smart Shopping.dmg` and drag
+the app to Applications. Then, in the app, **Scan Deals... -> Set Up
+Scanner...** to add the extension to your browser.
 
-```bash
-cd app && ./make_dmg.sh        # -> app/dist/Wellness Smart Shopping.dmg
-```
-
-Double-click the image and the familiar window opens: the app on one side, the
-Applications folder on the other. Drag it across and you are done.
-
-**Everything it needs is already inside it.** The control panel, the crawler,
-the themes and the browser script all ship in the app's Resources, so there is
-no folder to keep beside it, nothing to `pip install`, and no second step. The
-binary links Apple's frameworks and nothing else; the Python side is standard
-library only. The single outside requirement is `python3`, which macOS provides
-— on a Mac that has never installed the command line tools the app says exactly
-what to run.
-
-Your settings, scans and sales files live in
-`~/Library/Application Support/Wellness Smart Shopping/`, never inside the app,
-which is read-only and signed. To uninstall: drag the app to the Trash and
-delete that folder.
+Your settings and scans live in
+`~/Library/Application Support/Wellness Smart Shopping/`, and your deal files in
+`~/Documents/Deals`; nothing is written inside the app, which is read-only and
+signed. To uninstall, drag the app to the Trash and delete those two folders
+(and remove the Scanner from the extensions page).
 
 **Or from a clone**, if you want the crawler and the panel on the command line:
 
@@ -580,42 +435,30 @@ out of the URL: `.../rsid/<store_id>/...`.
 
 ---
 
-## Use
+## Use from the command line
 
 ```bash
-# See what this week's deals match, without writing anything
+# See what the saved scans match, without writing anything
 python3 crawl.py --report
 
-# Write the XML files
+# Write the deal files
 python3 crawl.py
 
 # One store at a time
 python3 crawl.py --stores costco
-
-# How to scan each store, printed to the terminal
-python3 crawl.py --scan-help
-
-# Use a scan saved somewhere else
-python3 crawl.py --harvest stews=~/Downloads/stews.txt
 ```
 
-A store you have not scanned yet prints its own directions instead of failing
-silently.
-
-Files land in `out/`, one per store plus an optional combined file:
+Deal files land in `~/Documents/Deals` (Finder: Documents > Deals), one per
+store and scan, plus an optional combined file:
 
 ```
-out/shoprite-sales-2026-09-20.xml
-out/costco-sales-2026-09-20.xml
+Documents/Deals/shoprite-sales-2026-09-21.xml
+Documents/Deals/stews-sales-2026-09-21.xml
+Documents/Deals/costco-sales-2026-09-21.xml
 ```
 
-### Import into the app
-
-In Smart Shopping List: **Import Sales XML…**, then choose a file from `out/`.
-The app applies every offer whose `itemId` it recognises and ignores the rest.
-
-> Account-clipped coupons still have to be clipped in your store account. The
-> XML tells the app what a deal is worth; it cannot clip it for you.
+Set `WSS_DEALS_DIR` to use another folder. If macOS won't let the panel write to
+Documents, it falls back to its own `out/` folder rather than failing.
 
 ---
 
@@ -634,45 +477,17 @@ The app applies every offer whose `itemId` it recognises and ignores the rest.
 
 ---
 
-## Adding your own store
+## Scanning with Claude instead
 
-No code required. Because nothing is fetched, a store is just a name and the
-pages worth scanning -- add it to `config.json`:
+Before the Scanner existed, scanning was done by giving Claude for Chrome an
+instruction the panel wrote for each store, and that route still works: without
+the Scanner installed, the panel shows the instruction with a Copy button, and a
+box to paste Claude's list into. Chrome now stops a store's page from posting to
+a local address, so Claude usually hands the list back to you to paste rather
+than filing it itself. Each store's instruction is its `"prompt"` in
+`config.json`.
 
-```json
-"stores": {
-  "mymarket": {
-    "enabled": true,
-    "name": "My Local Market",
-    "urls": [
-      { "label": "Open the weekly ad", "url": "https://example.com/weekly-ad" },
-      { "label": "Open digital coupons", "url": "https://example.com/coupons" }
-    ]
-  }
-}
-```
-
-It appears in the control panel immediately, with its own scan directions and
-its own `harvest/mymarket.txt`. The matcher, price maths and XML writer are
-shared, so any store benefits from them.
-
-### The scan prompt
-
-Each store hands Claude its own instruction. ShopRite's is specific because its
-coupons sit in a cross-origin frame that a plain "read this page" can't see;
-every other store gets a general one that loads all offers, checks the count
-and posts them back. If your store needs something particular, give it a
-`"prompt"` in `config.json` -- write `{submit}` where the panel's address goes:
-
-```json
-"mymarket": {
-  "name": "My Local Market",
-  "prompt": "Open the Coupons tab, click Load More until it stops, then list each offer as: product name | price | limit, and POST the list as plain text to {submit}"
-}
-```
-
-To use one wording for every store instead, set `scan_prompt` in
-`branding.json`. It's empty by default, which means "use each store's own".
+---
 
 ## The sales XML format
 
@@ -685,32 +500,28 @@ by hand -- this crawler is just one producer of it.
 
 ## What's next
 
+- **BJ's**, once the Scanner can read its deals.
 - 📱 **A mobile version is coming soon** -- the control panel is already a web
   app, which is the groundwork for it.
-- More stores. Adding one needs no code at all -- a name and the pages worth
-  scanning, in `config.json`. Contributions welcome.
-- The desktop app builds from source in `app/`, so it is open to changes too.
 
 ---
 
 ## Privacy
 
-- The crawler and the control panel run entirely on your machine, and make no
-  network requests of any kind.
-- The panel binds to `127.0.0.1` only -- it is not reachable from
-  your network.
+- The control panel and the crawler run entirely on your machine and make no
+  network requests of their own. The panel binds to `127.0.0.1` only.
+- The Scanner reads the stores' pages in your own browser and sends what it
+  read only to the panel on your machine. It never sees or asks for a password,
+  and checks only whether ShopRite's sign-in cookie exists -- never its value.
+- The desktop app's only network use is TheMealDB, for recipes.
 - Your height, weight and goal stay in `profile.json` on your machine.
-- **It never sees, asks for, or stores your store passwords.** Sign-in happens
-  in your own browser; only the visible text of a page you already opened is
-  ever read.
-- `config.json`, `branding.json`, `profile.json`, `harvest/` and `out/`
-  are git-ignored so your store numbers and
-  local data stay off GitHub.
+- `config.json`, `branding.json`, `profile.json`, `harvest/` and `out/` are
+  git-ignored, so your local data stays off GitHub.
 
 ---
 
 ## License
 
-[MIT](LICENSE) — free to use, change and redistribute, including commercially.
-No warranty: advertised prices change, stores make mistakes, and the matcher is
-heuristic. Always check your receipt.
+[MIT](LICENSE) -- free to use, change and redistribute. No warranty: advertised
+prices change, stores make mistakes, and the matcher is heuristic. Always check
+your receipt.

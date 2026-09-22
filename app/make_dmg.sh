@@ -109,6 +109,19 @@ if ! hdiutil convert "$RW_DMG" -format UDZO -imagekey zlib-level=9 -quiet -o "$D
   exit 1
 fi
 
+# Give the .dmg file itself the app's icon, so it does not show as a generic
+# disk image in Finder. (A custom file icon lives in the file's metadata, so a
+# plain web upload/download drops it; the disk inside keeps its own icon.)
+echo "  setting the file icon ..."
+if ! osascript -l JavaScript >/dev/null 2>&1 <<JXA
+ObjC.import("AppKit");
+var icon = \$.NSImage.alloc.initWithContentsOfFile("$PWD/Resources/AppIcon.icns");
+if (!\$.NSWorkspace.sharedWorkspace.setIconForFileOptions(icon, "$PWD/$DMG", 0)) throw "setIcon failed";
+JXA
+then
+  echo "  ! could not set the disk image's icon; it still installs" >&2
+fi
+
 SIZE=$(du -h "$DMG" | cut -f1 | tr -d ' ')
 echo
 echo "Built: $DMG  ($SIZE)"

@@ -8,8 +8,11 @@ either fail or break the signature.
   SOURCE_DIR  the code and the things that ship with it (themes, examples)
   DATA_DIR    your files: config.json, branding.json, profile.json,
               harvest/ and out/
+  DEALS_DIR   the sales files a scan produces: ~/Documents/Deals, where
+              they are easy to find and import
 
-Set WSS_DATA_DIR to put your files anywhere you like.
+Set WSS_DATA_DIR to put your files anywhere you like. Sales files always go
+to ~/Documents/Deals unless WSS_DEALS_DIR says otherwise.
 """
 
 import os
@@ -42,6 +45,31 @@ def _resolve_data_dir():
 
 DATA_DIR = _resolve_data_dir()
 IS_BUNDLED = enclosing_app_bundle(SOURCE_DIR) is not None
+
+
+DOCUMENTS_DEALS = os.path.expanduser("~/Documents/Deals")
+
+
+def _resolve_deals_dir():
+    # Always Documents > Deals -- even when the desktop app starts the panel
+    # with its own WSS_DATA_DIR -- unless WSS_DEALS_DIR says otherwise.
+    override = os.environ.get("WSS_DEALS_DIR")
+    if override:
+        return os.path.abspath(os.path.expanduser(override))
+    return DOCUMENTS_DEALS
+
+
+DEALS_DIR = _resolve_deals_dir()
+
+
+def friendly(path):
+    """~/Documents/Deals -> "Documents > Deals"; anything else as a ~ path."""
+    home = os.path.expanduser("~")
+    path = os.path.abspath(path)
+    if path.startswith(home + os.sep):
+        rel = path[len(home) + 1:]
+        return " > ".join(rel.split(os.sep)) if rel.startswith("Documents") else "~/" + rel
+    return path
 
 
 def data(*parts):

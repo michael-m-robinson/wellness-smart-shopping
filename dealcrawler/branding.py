@@ -143,12 +143,11 @@ DEFAULTS: Dict[str, str] = {
     "panel_switch_off": "OFF",
 
     "scan_title": "Scanning a store for deals",
-    "scan_intro": ("Deals come last on purpose. Your meals and your shopping "
-                   "list are built from your nutrition target at ordinary shelf "
-                   "prices, and only once that list exists are the week's offers "
-                   "looked up against it - so a coupon can lower what you pay, "
-                   "or suggest a cheaper swap for something you already wanted, "
-                   "but it never decides what goes in the basket. Every deal "
+    "scan_intro": ("Scan every store you shop, and the app builds your list "
+                   "around this week's deals: in each category it picks the "
+                   "option on sale, while your nutrition target still comes "
+                   "first - a deal only decides between choices that fit it "
+                   "equally well. Every deal "
                    "comes from a store page you are signed in to; this app never "
                    "contacts a store itself, so no password leaves the store "
                    "site."),
@@ -173,7 +172,7 @@ DEFAULTS: Dict[str, str] = {
     "import_steps": [
         "Open the Wellness Smart Shopping desktop app.",
         "Choose Import Sales XML... from the menu.",
-        "Pick the newest file from the out/ folder listed below.",
+        "Pick the newest file from the Deals folder in your Documents (Documents > Deals).",
         "The app applies each offer to the items your list already calls for, "
         "then proposes cheaper on-sale substitutes for the optional ones - your "
         "recipes and your target are left exactly as they were.",

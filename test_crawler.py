@@ -6,6 +6,11 @@ import unittest
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
+# Sales files default to ~/Documents/Deals. Tests must never write there, so
+# point them at a throwaway folder before any project module reads the path.
+import tempfile as _tempfile
+os.environ.setdefault("WSS_DEALS_DIR", _tempfile.mkdtemp(prefix="wss-test-deals-"))
+
 from dealcrawler.catalog import BY_ID, ITEMS, VALID_IDS
 from dealcrawler.matcher import match
 from dealcrawler.offers import Offer, dedupe, extract, mirror_twins, parse_limit
@@ -207,6 +212,13 @@ class TestPanel(unittest.TestCase):
         html_out = panel.page()
         for needle in ('id="refresh"', 'id="howto"', "<dialog", 'class="theme'):
             self.assertIn(needle, html_out)
+
+    def test_page_has_no_stray_control_characters(self):
+        """A "\\b" in the page's f-string once became a backspace, silently
+        breaking a regex in the script."""
+        import panel
+        stray = [c for c in panel.page() if ord(c) < 32 and c not in "\n\r\t"]
+        self.assertEqual(stray, [])
 
     def test_page_is_ascii_safe(self):
         import panel
@@ -625,18 +637,37 @@ class TestDesktopAppSource(unittest.TestCase):
         self.assertNotIn("Find & Apply Coupons", self.src)
         self.assertNotIn('"Coupons (', self.src)
 
-    def test_no_pdf_before_a_scan(self):
-        """Deals come first: without this week's scan, point at the button."""
+    def test_no_pdf_until_every_checked_store_is_scanned(self):
+        """Deals come first: each checked store needs this week's scan."""
         create = self.src[self.src.index("@objc func createPDF"):]
         create = create[:create.index("private func createPDFNow")]
-        self.assertLess(create.index("guard hasFreshScan"),
+        self.assertLess(create.index("let missing = unscannedStores()"),
                         create.index("createPDFNow(sender)"))
-        self.assertIn("nudgeToScan()", create)
+        self.assertIn("nudgeToScan(missing)", create)
+        self.assertIn("still \\(stores.count == 1 ? \"needs\" : \"need\") this week's scan", self.src)
         nudge = self.src[self.src.index("private func nudgeToScan"):]
         nudge = nudge[:nudge.index("private func pulse")]
         self.assertIn("pulse(couponsButton)", nudge)
         self.assertIn("NSPopover()", nudge)
         self.assertIn("of: couponsButton", nudge)
+
+    def test_bjs_is_coming_soon_and_its_items_move(self):
+        self.assertIn('let comingSoonStores: Set<String> = ["BJ\'s"]', self.src)
+        build = self.src[self.src.index("private func buildWindow"):]
+        self.assertIn("bjs.isEnabled = false", build)
+        self.assertIn("coming soon", build[build.index("bjs.toolTip"):][:200])
+        # Its items are bought elsewhere, never dropped.
+        for item in ("eggs", "milk", "chicken", "salmon", "oats"):
+            self.assertIn(f'"{item}": ', self.src[self.src.index("let relocatedStore"):][:600])
+
+    def test_deals_pick_within_each_category_goal_first(self):
+        self.assertNotIn("presentSaleSwapPreview", self.src)          # applied automatically
+        plan = self.src[self.src.index("func recipesForPlan"):][:1400]
+        self.assertIn("preferIDs", plan)
+        self.assertIn("($0.1, $0.2) > ($1.1, $1.2)", plan)           # goal score first
+        self.assertIn("On sale this week, so we picked", self.src)
+        self.assertIn("shoppableCatalog(catalog, dealStores: couponSources", self.src)
+        self.assertIn("SELF_TEST_SALE_PICKS_OK", self.src)
 
     def test_app_says_what_a_scan_is_worth_when_no_deals_are_loaded(self):
         launch = self.src[self.src.index("func applicationDidFinishLaunching"):]
@@ -644,6 +675,20 @@ class TestDesktopAppSource(unittest.TestCase):
         self.assertIn("if verifiedSaleItemIDs().isEmpty", launch)
         self.assertIn("pulse(self.couponsButton)", launch)
         self.assertIn("You could be saving money this week", self.src)
+
+    def test_every_import_says_whether_it_worked(self):
+        imp = self.src[self.src.index("@objc func importSalesXML"):]
+        imp = imp[:imp.index("/// How an import ended")]
+        for outcome in (".couldNotRead(", ".notASalesFile(", "confirmImport(.nothingMatched",
+                        "confirmImport(.noneChosen", "confirmImport(.couldNotSave",
+                        "confirmImport(.applied"):
+            self.assertIn(outcome, imp, outcome)
+        self.assertIn("panel.allowsMultipleSelection = true", imp)   # several stores at once
+        self.assertIn("recordScan(of: store)", imp)                  # per-store record
+        # "Applied" is only claimed after reading the deals back.
+        self.assertLess(imp.index("dealsWereSaved"), imp.index("confirmImport(.applied"))
+        self.assertIn('"Your deals weren\'t applied"', self.src)
+        self.assertIn("Documents/Deals", self.src)          # the picker opens there
 
     def test_importing_a_sales_file_counts_as_a_scan(self):
         imp = self.src[self.src.index("@objc func importSalesXML"):]
@@ -1309,6 +1354,102 @@ class TestScannerReports(unittest.TestCase):
             finally:
                 server.shutdown()
                 paths.DATA_DIR = saved
+
+
+class TestScanEveryStore(unittest.TestCase):
+    """Every store gets scanned, and a quiet week still counts as scanned."""
+
+    def test_a_quiet_week_still_writes_the_stores_file(self):
+        import tempfile
+        import panel
+
+        class Quiet:
+            key, name = "costco", "Costco"
+        with tempfile.TemporaryDirectory() as tmp:
+            saved = panel.OUT_DIR
+            panel.OUT_DIR = tmp
+            try:
+                path = panel.write_sales_file(Quiet, [])
+                self.assertTrue(os.path.isfile(path))
+                body = open(path).read()
+                self.assertIn('store="Costco"', body)
+                self.assertNotIn("<offer", body)
+                self.assertEqual(panel.deals_on_hand()["count"], 0)   # no deals, but scanned
+            finally:
+                panel.OUT_DIR = saved
+
+    def test_panel_can_scan_all_stores(self):
+        import panel
+        html_out = panel.page()
+        self.assertIn('id="w-all"', html_out)
+        self.assertIn("async function scanAll()", html_out)
+        self.assertIn("Import it anyway so the app knows", html_out)
+
+
+class TestDealsFolder(unittest.TestCase):
+    """Sales files go to ~/Documents/Deals, where people can find them."""
+
+    def test_default_is_documents_deals(self):
+        from unittest import mock
+        from dealcrawler import paths
+        with mock.patch.dict(os.environ, {}, clear=False):
+            os.environ.pop("WSS_DEALS_DIR", None)
+            os.environ.pop("WSS_DATA_DIR", None)
+            self.assertEqual(paths._resolve_deals_dir(),
+                             os.path.expanduser("~/Documents/Deals"))
+        # The desktop app starts the panel with its own WSS_DATA_DIR; deal
+        # files must still land in Documents > Deals.
+        with mock.patch.dict(os.environ, {"WSS_DATA_DIR": "/tmp/somewhere"}):
+            os.environ.pop("WSS_DEALS_DIR", None)
+            self.assertEqual(paths._resolve_deals_dir(),
+                             os.path.expanduser("~/Documents/Deals"))
+        with mock.patch.dict(os.environ, {"WSS_DEALS_DIR": "/tmp/mydeals"}):
+            self.assertEqual(paths._resolve_deals_dir(), "/tmp/mydeals")
+        self.assertEqual(paths.friendly(os.path.expanduser("~/Documents/Deals")),
+                         "Documents > Deals")
+
+    def test_old_app_support_files_move_to_the_deals_folder(self):
+        import tempfile
+        import panel
+        from dealcrawler import paths
+        saved = (panel.OUT_DIR, paths.APP_SUPPORT)
+        with tempfile.TemporaryDirectory() as tmp:
+            try:
+                paths.APP_SUPPORT = os.path.join(tmp, "support")
+                os.makedirs(os.path.join(paths.APP_SUPPORT, "out"))
+                for name in ("stews-sales-2026-09-21.xml", "notes.txt"):
+                    open(os.path.join(paths.APP_SUPPORT, "out", name), "w").write("<s/>")
+                panel.OUT_DIR = os.path.join(tmp, "Deals")
+                self.assertEqual(panel.move_old_sales_files(), ["stews-sales-2026-09-21.xml"])
+                self.assertTrue(os.path.isfile(os.path.join(tmp, "Deals", "stews-sales-2026-09-21.xml")))
+                self.assertTrue(os.path.isfile(os.path.join(paths.APP_SUPPORT, "out", "notes.txt")))
+            finally:
+                panel.OUT_DIR, paths.APP_SUPPORT = saved
+
+    def test_unwritable_documents_falls_back_instead_of_failing(self):
+        import tempfile
+        import panel
+        from dealcrawler import paths
+        saved_out, saved_data = panel.OUT_DIR, paths.DATA_DIR
+        with tempfile.TemporaryDirectory() as tmp:
+            locked = os.path.join(tmp, "locked")
+            os.makedirs(locked)
+            os.chmod(locked, 0o500)                 # like macOS refusing Documents
+            try:
+                panel.OUT_DIR = os.path.join(locked, "Deals")
+                paths.DATA_DIR = os.path.join(tmp, "data")
+                self.assertEqual(panel.sales_dir(), os.path.join(tmp, "data", "out"))
+            finally:
+                os.chmod(locked, 0o700)
+                panel.OUT_DIR, paths.DATA_DIR = saved_out, saved_data
+
+    def test_people_are_told_where_the_files_are(self):
+        import panel
+        html_out = panel.page()
+        self.assertIn("Your deal files are saved in", html_out)
+        self.assertIn('id="w-done-where"', html_out)
+        from dealcrawler import branding
+        self.assertTrue(any("Documents > Deals" in s for s in branding.DEFAULTS["import_steps"]))
 
 
 class TestPanelLifetime(unittest.TestCase):

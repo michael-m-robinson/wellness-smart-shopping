@@ -31,7 +31,46 @@ from dealcrawler import (branding, offers as offers_mod, paths, profile as profi
                          stores as stores_mod, xmlout)
 from dealcrawler.sources import harvest
 
-OUT_DIR = paths.data("out")
+# Sales files: ~/Documents/Deals, unless that cannot be written (macOS can
+# deny access to Documents); then they stay in the data folder's out/.
+OUT_DIR = paths.DEALS_DIR
+
+
+def move_old_sales_files() -> list:
+    """Move deal files the app's panel used to save in Application Support
+    into the deals folder. Returns what moved. (A clone's out/ is left alone:
+    it can hold test output.)"""
+    old = os.path.join(paths.APP_SUPPORT, "out")
+    if os.path.realpath(old) == os.path.realpath(OUT_DIR) or not os.path.isdir(old):
+        return []
+    moved = []
+    for name in sorted(os.listdir(old)):
+        if "-sales-" not in name or not name.endswith(".xml"):
+            continue
+        target = os.path.join(sales_dir(), name)
+        if os.path.exists(target):
+            continue                      # never overwrite a newer scan
+        try:
+            os.replace(os.path.join(old, name), target)
+            moved.append(name)
+        except OSError:
+            pass
+    return moved
+
+
+def sales_dir() -> str:
+    """Create the sales-file folder, falling back if Documents is off limits."""
+    global OUT_DIR
+    try:
+        os.makedirs(OUT_DIR, exist_ok=True)
+        probe = os.path.join(OUT_DIR, ".wss-write-test")
+        with open(probe, "w") as fh:
+            fh.write("ok")
+        os.remove(probe)
+    except OSError:
+        OUT_DIR = paths.data("out")
+        os.makedirs(OUT_DIR, exist_ok=True)
+    return OUT_DIR
 paths.ensure_data_dir()
 
 _state = {"running": False, "last": None}
@@ -194,16 +233,9 @@ def run_refresh() -> dict:
         if use_twins:
             found = offers_mod.dedupe(offers_mod.mirror_twins(found))
 
-        path = ""
-        if found:
-            os.makedirs(OUT_DIR, exist_ok=True)
-            xml = xmlout.render(store.name, found)
-            if not xmlout.validate(xml):
-                today = datetime.date.today()
-                path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
-                with open(path, "w", encoding="utf-8") as fh:
-                    fh.write(xml)
-                written.append(path)
+        path = write_sales_file(store, found)
+        if path and found:
+            written.append(path)
 
         age = store.scan_age_hours
         scanned.append({
@@ -255,6 +287,23 @@ def find_app() -> str:
     return ""
 
 
+def write_sales_file(store, offers) -> str:
+    """Write a store's deal file and return its path ("" if it would be invalid).
+
+    Written even when nothing matched: the empty file still tells the app the
+    store was scanned this week, so a quiet week never blocks the PDFs.
+    """
+    sales_dir()
+    xml = xmlout.render(store.name, offers)
+    if offers and xmlout.validate(xml):
+        return ""
+    today = datetime.date.today()
+    path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
+    with open(path, "w", encoding="utf-8") as fh:
+        fh.write(xml)
+    return path
+
+
 def build_for(store) -> dict:
     """Parse a store's scan and write its XML. Returns what was found."""
     cfg = load_config()
@@ -272,15 +321,7 @@ def build_for(store) -> dict:
     if use_twins:
         offers = offers_mod.dedupe(offers_mod.mirror_twins(offers))
 
-    xml_path = ""
-    if offers:
-        os.makedirs(OUT_DIR, exist_ok=True)
-        xml = xmlout.render(store.name, offers)
-        if not xmlout.validate(xml):
-            today = datetime.date.today()
-            xml_path = os.path.join(OUT_DIR, f"{store.key}-sales-{today:%Y-%m-%d}.xml")
-            with open(xml_path, "w", encoding="utf-8") as fh:
-                fh.write(xml)
+    xml_path = write_sales_file(store, offers)
     # The offers themselves, once per product (a snack twin repeats its
     # parent's), so the scan result can list what to load to an account.
     listed, seen = [], set()
@@ -522,6 +563,9 @@ def page() -> str:
     color:inherit;font-size:1.3rem;line-height:1;opacity:.6}}
   .note .x:hover{{opacity:1}}
   #savebar{{margin:16px 0}}
+  .where{{margin:10px 0 0;padding:9px 12px;border-radius:10px;font-size:.92rem;
+    background:var(--fresh-1);border:1px solid var(--fresh-line);color:var(--fresh-ink)}}
+  .where[hidden]{{display:none}}
   .note button.go{{border:0;cursor:pointer;font:inherit;font-weight:700}}
   #w-redeem{{margin:0 0 18px}}
   .redeem-items{{list-style:none;margin:14px 0 0;padding:0}}
@@ -611,6 +655,15 @@ def page() -> str:
     text-decoration:none}}
   .btnlink:hover{{opacity:.92}}
   .pickers{{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:4px}}
+  .allstores{{width:100%;margin-top:12px}}
+  .allstores[hidden]{{display:none}}
+  .allstores-list{{list-style:none;padding:0;margin:14px 0 0}}
+  .allstores-list li{{display:flex;justify-content:space-between;gap:12px;padding:10px 12px;
+    margin:0 0 8px;border:1px solid var(--line);border-radius:10px}}
+  .allstores-list li b{{font-weight:650}}
+  .allstores-list li span{{color:var(--muted);text-align:right}}
+  .allstores-list li.good span{{color:var(--good);font-weight:600}}
+  .allstores-list li.bad span{{color:var(--warn)}}
   .picker{{text-align:left;padding:13px 15px}}
   .picker b{{display:block;font-size:1rem}}
   .picker span{{display:block;font-size:.78rem;color:var(--muted);font-weight:500;
@@ -905,9 +958,25 @@ def page() -> str:
     <h2>{g('scan_pick_title')}</h2>
     <p class="muted">{g('scan_pick_intro')}</p>
     <div class="pickers">{pick_html}</div>
+    <button class="primary allstores" id="w-all" hidden>Scan all my stores</button>
     <div class="row" style="margin:16px 0 0">
       <button id="w-pick-close">Close</button>
       <button id="w-help">{g('scan_help_button')}</button>
+    </div>
+  </section>
+
+  <section id="w-allrun" hidden>
+    <h2 id="w-all-title">Scanning all your stores</h2>
+    <p class="muted" id="w-all-intro">One at a time, each in its own tab - leave them in
+      front until they finish. It only reads the pages; it never loads, clips or buys anything.</p>
+    <ul class="allstores-list" id="w-all-list"></ul>
+    <p class="where" id="w-all-where" hidden></p>
+    <p class="muted" id="w-all-next" hidden>Next, in the app: <b>Scan Deals... &rarr; Import Sales XML...</b>
+      and pick all of this week's files at once (hold Command to select several).</p>
+    <div class="row" style="margin:16px 0 0">
+      <button class="primary" id="w-all-import" hidden>Open the app to import</button>
+      <button id="w-all-stop">Stop after this store</button>
+      <button id="w-all-close" hidden>Close</button>
     </div>
   </section>
 
@@ -965,6 +1034,7 @@ def page() -> str:
     </div>
     <h2 id="w-done-title"></h2>
     <p id="w-done-body" class="muted"></p>
+    <p class="where" id="w-done-where" hidden></p>
     <div class="row" style="margin:16px 0 0">
       <button class="primary" id="w-import">{g('scan_import_now')}</button>
       <button id="w-later">{g('scan_import_later')}</button>
@@ -995,10 +1065,11 @@ def page() -> str:
 <dialog id="dlg"><div class="inner">
   <h2>{g('import_title')}</h2>
   <ol>{steps_html}</ol>
+  <p class="where" style="margin:0 0 16px">Your deal files are saved in
+    <b>{html.escape(paths.friendly(OUT_DIR))}</b>, one per store and scan.</p>
   <div class="card warn" style="margin:0 0 16px"><strong>Signed out?</strong>
-    Grocers only show coupons to a signed-in session. Sign in to the store in
-    Chrome, open its coupon list, then ask Claude (with the Claude for Chrome
-    extension) to run <code>browser/harvest.js</code> on that tab.</div>
+    Some stores only show coupons to a signed-in session. Sign in to the store
+    in your browser, then scan it again.</div>
   <p class="muted">{g('import_note')}</p>
   <div class="row" style="margin:16px 0 0"><button class="primary" id="close">Close</button></div>
 </div></dialog>
@@ -1172,6 +1243,15 @@ addEventListener("message", (e) => {{
   if (e.source !== window || !e.data || e.data.source !== "wss-scanner") return;
   const d = e.data;
   if (d.type === "ready") scannerFound(d.version);
+  if (d.type === "progress" && allRun && allRun.now) {{
+    allRun.now.querySelector("span").textContent = d.text || "Scanning...";
+  }}
+  if (d.type === "result" && allRun && allRun.pending) {{
+    const resolve = allRun.pending;
+    allRun.pending = null;
+    resolve(d);
+    return;
+  }}
   if (d.type === "progress" && scannerJob) {{
     $("#w-status").innerHTML = '<span class="spin"></span>' + esc(d.text || "");
   }}
@@ -1204,7 +1284,7 @@ const wiz = $("#scanwiz");
 let wizState = {{store: null, baseline: 0, xml: "", timer: null}};
 
 function wizStep(id) {{
-  ["w-pick", "w-signin", "w-wait", "w-done", "w-after"].forEach(
+  ["w-pick", "w-signin", "w-wait", "w-done", "w-after", "w-allrun"].forEach(
     s => $("#" + s).hidden = (s !== id));
 }}
 
@@ -1223,7 +1303,90 @@ async function wizPost(action, body) {{
   return r.json();
 }}
 
-$("#scanwith").onclick = () => {{ wizStop(); wizStep("w-pick"); wiz.showModal(); }};
+$("#scanwith").onclick = () => {{
+  wizStop();
+  $("#w-all").hidden = !SCANNER;          // needs the Scanner to run unattended
+  wizStep("w-pick");
+  wiz.showModal();
+}};
+
+// ---- Scan all my stores ------------------------------------------------------
+// Every store in turn, through the Scanner: each is opened, read and filed,
+// and its line shows what it found. Then one import in the app takes them all.
+let allRun = null;
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+async function scanAll() {{
+  const stores = [...document.querySelectorAll(".picker[data-store]")]
+    .map(el => ({{key: el.dataset.store, name: el.querySelector("b").textContent}}));
+  allRun = {{pending: null, now: null, stop: false}};
+  $("#w-all-title").textContent = "Scanning all your stores";
+  ["#w-all-where", "#w-all-next", "#w-all-import", "#w-all-close"].forEach(id => $(id).hidden = true);
+  $("#w-all-stop").hidden = false;
+  $("#w-all-stop").textContent = "Stop after this store";
+  const list = $("#w-all-list");
+  list.innerHTML = stores.map(s => '<li data-key="' + esc(s.key) + '"><b>' + esc(s.name) +
+    '</b><span>Waiting</span></li>').join("");
+  wizStep("w-allrun");
+
+  let found = 0, done = 0, lastXml = "", folder = "";
+  for (const s of stores) {{
+    const li = list.querySelector('li[data-key="' + s.key + '"]');
+    if (allRun.stop) {{ li.querySelector("span").textContent = "Skipped"; continue; }}
+    allRun.now = li;
+    li.querySelector("span").textContent = "Scanning...";
+    const d = await wizPost("start", {{store: s.key}});
+    const res = await new Promise(resolve => {{
+      allRun.pending = resolve;
+      postMessage({{source: "wss-panel", type: "scan", store: d.store, name: d.name,
+                   adapter: d.adapter, url: (d.urls && d.urls[0]) ? d.urls[0].url : ""}},
+                  location.origin);
+    }});
+    if (!res.ok) {{
+      li.className = "bad";
+      li.querySelector("span").textContent = res.error || "Couldn't finish";
+      continue;
+    }}
+    // The panel turns the scan into a deal file; wait for it.
+    let c = {{ready: false}};
+    for (let i = 0; i < 30 && !c.ready; i++) {{
+      c = await wizPost("check", {{store: s.key, baseline: d.baseline}});
+      if (!c.ready) await sleep(500);
+    }}
+    done++;
+    const n = c.count || 0;
+    found += n;
+    if (c.xml) {{ lastXml = c.xml; folder = c.folder || folder; }}
+    li.className = n ? "good" : "";
+    li.querySelector("span").textContent = n
+      ? n + " deal" + (n === 1 ? "" : "s") + " for your list"
+      : "Nothing for your list this week";
+  }}
+  wizPost("cancel", {{store: stores.length ? stores[0].key : ""}}).catch(() => {{}});
+  allRun = null;
+  refreshDeals();
+
+  $("#w-all-title").textContent = found
+    ? "All done - " + found + " deal" + (found === 1 ? "" : "s") + " found across your stores!"
+    : (done ? "All done - a quiet week, nothing matched your list" : "The scan didn't finish");
+  if (folder) {{
+    $("#w-all-where").textContent = "Saved in " + folder + " - one file per store, ready to import.";
+    $("#w-all-where").hidden = false;
+  }}
+  $("#w-all-next").hidden = !lastXml;
+  $("#w-all-import").hidden = !lastXml;
+  $("#w-all-import").onclick = async () => {{
+    await wizPost("import", {{store: stores[0].key, xml: lastXml}}).catch(() => {{}});
+  }};
+  $("#w-all-stop").hidden = true;
+  $("#w-all-close").hidden = false;
+}}
+
+$("#w-all").onclick = () => scanAll();
+$("#w-all-stop").onclick = () => {{
+  if (allRun) {{ allRun.stop = true; $("#w-all-stop").textContent = "Stopping after this store..."; }}
+}};
+$("#w-all-close").onclick = () => {{ wiz.close(); location.reload(); }};
 $("#w-pick-close").onclick = () => {{ wizStop(true); wiz.close(); }};
 $("#w-cancel").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
 $("#w-again").onclick = () => {{ wizStop(true); wizStep("w-pick"); }};
@@ -1297,16 +1460,24 @@ async function wizPoll() {{
   }}
   wizState.xml = d.xml || "";
   refreshDeals();
+  // Where the file went, so it is easy to find again.
+  $("#w-done-where").textContent = d.folder
+    ? "Saved in " + d.folder + " - that's where your deal files live, ready to import any time." : "";
+  $("#w-done-where").hidden = !d.folder;
   showRedeem(wizState.started && wizState.started.redeem, d.count, d.offers || []);
   if (!d.count) {{
     $("#w-done-title").textContent =
       {j('scan_none_title')}.replace("{{store}}", d.name).replace("{{count}}", "0");
     $("#w-done-body").textContent = {j('scan_none_body')};
-    $("#w-import").hidden = true;
-    $("#w-later").textContent = "Close";
+    // Still worth importing: it tells the app this store is covered this week.
+    $("#w-import").hidden = !d.xml;
+    if (d.xml) $("#w-done-body").textContent += " Import it anyway so the app knows " +
+      d.name + " is covered this week.";
+    $("#w-later").textContent = d.xml ? {j('scan_import_later')} : "Close";
   }} else {{
     $("#w-done-title").textContent = {j('scan_done_title')}
-      .replace("{{store}}", d.name).replace("{{count}}", d.count);
+      .replace("{{store}}", d.name).replace("{{count}}", d.count)
+      .replace(": 1 deals ", ": 1 deal ");
     $("#w-done-body").textContent = {j('scan_done_body')};
     $("#w-import").hidden = false;
     $("#w-later").textContent = {j('scan_import_later')};
@@ -1885,6 +2056,8 @@ class Handler(BaseHTTPRequestHandler):
                     "ready": True, "name": store.name,
                     "count": result.get("count", 0),
                     "xml": result.get("xml", ""),
+                    "folder": paths.friendly(os.path.dirname(result["xml"]))
+                              if result.get("xml") else "",
                     "offers": result.get("offers", []),
                     "error": result.get("error", ""),
                 }), "application/json")
@@ -1983,6 +2156,9 @@ def main(argv=None):
               f"Something else is using it. Try:  python3 panel.py --port {args.port + 1}",
               file=sys.stderr)
         return 1
+    moved = move_old_sales_files()
+    if moved:
+        print(f"  Moved {len(moved)} deal file(s) to {paths.friendly(OUT_DIR)}.")
     print(f"{branding.load().get('app_name')} - control panel\n  {url}\n"
           "  Press Ctrl+C to stop.")
     threading.Thread(target=_watchdog, args=(server, args.close_grace),

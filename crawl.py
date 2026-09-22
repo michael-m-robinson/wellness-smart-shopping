@@ -67,7 +67,8 @@ def main(argv=None):
     ap.add_argument("--stores", default="", help="comma list of store keys")
     ap.add_argument("--harvest", action="append", default=[], metavar="STORE=FILE",
                     help="use a scan file from somewhere other than harvest/")
-    ap.add_argument("--out", default=paths.data("out"))
+    ap.add_argument("--out", default=paths.DEALS_DIR,
+                    help="where the sales files go (default: Documents/Deals)")
     ap.add_argument("--report", action="store_true", help="print matches, write nothing")
     ap.add_argument("--per-weight", choices=["convert", "skip"], default=None)
     ap.add_argument("--no-snack-twins", action="store_true")
