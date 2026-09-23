@@ -38,6 +38,8 @@ class Offer:
     source_url: str = ""
     # why this number is what it is -- surfaced in --report, never in the XML
     basis: str = ""
+    # last day the deal is good for, "YYYY-MM-DD" ("" when the page gave none)
+    expires: str = ""
 
     @property
     def value(self) -> float:
@@ -177,6 +179,6 @@ def mirror_twins(offers: List[Offer]) -> List[Offer]:
             out.append(Offer(item_id=twin, store=o.store, title=o.title,
                              savings=o.savings, sale_price=o.sale_price,
                              limit=o.limit, note=o.note, source_url=o.source_url,
-                             basis=f"mirrored from {o.item_id}"))
+                             basis=f"mirrored from {o.item_id}", expires=o.expires))
             seen.add((twin, o.store))
     return out

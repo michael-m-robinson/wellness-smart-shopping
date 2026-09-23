@@ -135,6 +135,42 @@ class TestOffers(unittest.TestCase):
         self.assertEqual(ids, {"eggs", "snackeggs"})
 
 
+class TestDealEndDates(unittest.TestCase):
+    """A deal's last day travels from the scan to the shopping list."""
+
+    def test_ends_field_is_read_and_never_taken_for_a_price(self):
+        from dealcrawler.sources.harvest import parse_lines
+        offers = {o.item_id: o for o in parse_lines([
+            "Nature's Own Bread | $1.00 off | Limit 4 | ends 2026-09-26",
+            "Chobani Flip Yogurt | $1.00 off | no limit",
+        ], "ShopRite")}
+        self.assertEqual(offers["bread"].expires, "2026-09-26")
+        self.assertEqual(offers["bread"].savings, 1.00)
+        self.assertEqual(offers["bread"].limit, 4)
+        self.assertEqual(offers["yogurt"].expires, "")
+
+    def test_the_date_reaches_the_file_and_the_snack_twins(self):
+        from dealcrawler.offers import Offer, mirror_twins
+        from dealcrawler.xmlout import render, validate
+        offers = mirror_twins([Offer(item_id="yogurt", store="ShopRite", title="Chobani",
+                                     savings=1.0, expires="2026-10-03")])
+        self.assertEqual({o.expires for o in offers}, {"2026-10-03"})
+        xml = render("ShopRite", offers)
+        self.assertIn('expires="2026-10-03"', xml)
+        self.assertEqual(validate(xml), [])
+
+    def test_the_app_prints_both_prices_and_stops_at_the_end_date(self):
+        src = open(os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                "app", "main.swift"), encoding="utf-8").read()
+        self.assertIn('dealDate(attr("expires"))', src)          # read from the file
+        self.assertIn("func dealIsActive", src)
+        self.assertIn("couponValues.filter { dealIsActive(couponExpiry[$0.key]) }", src)
+        self.assertNotIn("coupons: couponValues, couponLimits", src)   # plans use active only
+        self.assertIn('Sale \\(money(row.lineTotal)) · regular \\(money(row.grossLineTotal))', src)
+        self.assertIn('deal ends \\(dealEndText(ends))', src)
+        self.assertIn('was \\(money(row.grossLineTotal))', src)
+
+
 class TestXML(unittest.TestCase):
     def test_matches_app_fixture_shape(self):
         xml = render("ShopRite", [

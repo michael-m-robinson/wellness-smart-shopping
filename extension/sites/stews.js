@@ -17,6 +17,7 @@
  *             about 3 in 10 cards have no original price: the sale price is
  *             simply the price shown
  *   size      a short line such as "16 oz" or "4 ct"
+ *   ends      the heading's range: "Weekly Specials 9/16-9/22" -> 9/22 for every card
  *   No sign-in needed, and no purchase limits are shown.
  */
 (function (root) {
@@ -33,12 +34,23 @@
     return H.fmt(n);
   }
 
+  // The week's end date, from the list's heading (read once per page).
+  const weekEnds = new WeakMap();
+  function weekEnd(doc) {
+    if (!doc) return "";
+    if (!weekEnds.has(doc)) {
+      const dates = H.dates(H.text(doc, "h1"));
+      weekEnds.set(doc, dates[dates.length - 1] || "");
+    }
+    return weekEnds.get(doc);
+  }
+
   const SIZE = /^\d+(?:\.\d+)?\s*(?:x\s*\d+(?:\.\d+)?\s*)?(?:oz|fl oz|lb|lbs|ct|g|kg|ml|l|gal|pk|pack|qt|pt)\b\.?$/i;
 
   const site = WSS.defineSite({
     key: "stews",
     name: "Stew Leonard's",
-    version: 1,
+    version: 2,
     verified: "2026-09-21",
     startUrl: "https://shopnow.stewleonards.com/store/stew-leonards/storefront",
     readableOn: "shopnow\\.stewleonards\\.com/store/stew-leonards/(storefront|collections/rc-weekly-specials-)",
@@ -68,6 +80,7 @@
         current: sr.find((t) => /^current price/i.test(t)) || "",
         original: sr.find((t) => /^original price/i.test(t)) || "",
         size: lines.find((t) => SIZE.test(t)) || "",
+        ends: weekEnd(el.ownerDocument),
       };
     },
     line: (r) => {
@@ -75,7 +88,7 @@
       if (!r.name || !now) return null;
       const was = priceField(r.original);
       const name = r.size && !r.name.includes(r.size) ? `${r.name}, ${r.size}` : r.name;
-      return H.join(H.tidy(name), was ? `${now}, was ${was}` : now, null);
+      return H.join(H.tidy(name), was ? `${now}, was ${was}` : now, null, r.ends);
     },
 
     expect: { min: 30, maxSkipped: 0.05 },

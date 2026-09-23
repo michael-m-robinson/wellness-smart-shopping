@@ -11,6 +11,7 @@
  *   savings   .coupon-savings   "Save $5.00", "Buy 1 Get 1 Free"
  *   text      .coupon-desc      title and body run together; the ellipsis is CSS
  *   badges    .coupon-badge     "New", "Weekly Ad", "Limit 4"
+ *   ends      .coupon-expiration-text   "Expires: 09/26/2026 - 5 days left"
  *   totals    "All Coupons - (140)", "Limit 4 Offers - (43)"
  *   signed in shoprite.com sets a cookie named "oidc.user:https://auth.brands.
  *             wakefern.com:<client>" (URL-encoded) while you are signed in;
@@ -82,7 +83,7 @@
   const site = WSS.defineSite({
     key: "shoprite",
     name: "ShopRite",
-    version: 2,
+    version: 3,
     verified: "2026-09-21",
     startUrl: "https://shop-rite-web-prod.azurewebsites.net/",
     readableOn: "^https://shop-rite-web-prod\\.azurewebsites\\.net/",
@@ -108,11 +109,13 @@
       savings: H.text(el, ".coupon-savings"),
       desc: H.text(el, ".coupon-desc"),
       badges: H.texts(el, ".coupon-badge"),
+      expires: H.text(el, ".coupon-expiration-text"),
     }),
     line: (r) => {
       const name = cleanName(r.desc);
       if (!name) return null;
-      return H.join(name, savingsField(r.savings), H.limit(r.badges.join(" ")));
+      return H.join(name, savingsField(r.savings), H.limit(r.badges.join(" ")),
+                    H.dates(r.expires || "")[0]);
     },
 
     expect: {

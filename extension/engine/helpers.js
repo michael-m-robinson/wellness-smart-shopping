@@ -77,8 +77,28 @@
     return t;
   };
 
-  // The one line format the panel reads:  name | price or discount | limit
-  H.join = (name, price, limit) => `${name} | ${price} | ${limit || "no limit"}`;
+  // Every date in a string, as "YYYY-MM-DD": "Expires: 09/26/2026" ->
+  // ["2026-09-26"]; "Valid 9/21/26 - 10/18/26" -> ["2026-09-21", "2026-10-18"].
+  // A date with no year ("9/16-9/22") takes this year -- or next year, if that
+  // would put it more than two months in the past (a flyer that crosses New Year).
+  H.dates = (s, now = new Date()) => {
+    const out = [];
+    const re = /(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/g;
+    let m;
+    while ((m = re.exec(H.clean(s)))) {
+      const month = Number(m[1]), day = Number(m[2]);
+      if (month < 1 || month > 12 || day < 1 || day > 31) continue;
+      let year = m[3] ? Number(m[3].length === 2 ? "20" + m[3] : m[3]) : now.getFullYear();
+      if (!m[3] && new Date(year, month - 1, day) < new Date(now.getTime() - 60 * 864e5)) year++;
+      out.push(`${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}`);
+    }
+    return out;
+  };
+
+  // The one line format the panel reads:
+  //   name | price or discount | limit [| ends YYYY-MM-DD]
+  H.join = (name, price, limit, ends) =>
+    `${name} | ${price} | ${limit || "no limit"}` + (ends ? ` | ends ${ends}` : "");
 
   if (typeof module === "object" && module.exports) module.exports = WSS;
 })(globalThis);

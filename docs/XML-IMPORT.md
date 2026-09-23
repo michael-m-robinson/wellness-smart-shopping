@@ -10,7 +10,7 @@ sale price.
 ```xml
 <?xml version="1.0" encoding="UTF-8"?>
 <shopriteSales store="ShopRite" date="2026-09-20">
-  <offer itemId="turkey" savings="2.00" limit="4" note="93% lean ground turkey"/>
+  <offer itemId="turkey" savings="2.00" limit="4" expires="2026-09-26" note="93% lean ground turkey"/>
   <offer itemId="eggs" salePrice="2.49" limit="6" note="Large eggs 18ct"/>
 </shopriteSales>
 ```
@@ -25,6 +25,9 @@ sale price.
   - `salePrice` — the advertised price **of one package**.
 - `limit` (optional) is the store's purchase cap. The app honours it when
   totalling savings.
+- `expires` (optional) is the last day the deal is good for, as `YYYY-MM-DD`.
+  The app prints it on the shopping list and stops using the deal after that
+  day. Leave it out and the deal is treated as open-ended.
 - `note` (optional) is free text shown next to the matched item.
 - `itemId` must be one of the catalog IDs below. **Unknown IDs are silently
   ignored**, so a typo costs you the offer with no error.
@@ -35,7 +38,7 @@ The importer scans for `<offer .../>` elements and reads attributes by hand
 rather than using a full XML parser. To stay compatible:
 
 - Keep one offer per line, self-closing, with attributes in the order
-  `itemId`, `savings`/`salePrice`, `limit`, `note`.
+  `itemId`, `savings`/`salePrice`, `limit`, `expires`, `note`.
 - Use straight double quotes.
 - Keep `note` to plain ASCII. Avoid `&`, `<`, `>`, and quotes entirely rather
   than relying on entity escaping — `dealcrawler/xmlout.py` strips them.

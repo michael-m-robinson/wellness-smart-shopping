@@ -63,8 +63,11 @@ if some of this saves you part of that chore, it has done its job.
   favorites are never swapped.
 - **Each item is listed where its deal is.** If Stew's has the salmon on sale,
   the salmon is on your Stew's list.
-- **It respects purchase limits.** "Limit 4" is carried into the file, so the
-  savings you are shown are savings you can really get at the register.
+- **It respects purchase limits and end dates.** "Limit 4" is carried into the
+  file, so the savings you are shown are savings you can really get at the
+  register. Each deal's last day is carried too: the shopping list prints
+  **both prices and the day the deal ends**, and a deal that has ended is left
+  out of the plan rather than flattering the estimate.
 - **It is honest about what a deal is worth.** A `$3.99/lb` advertisement is
   converted into a real per-package price, "2 for $5" becomes a unit price, and
   a discount larger than the item's normal price is capped instead of being

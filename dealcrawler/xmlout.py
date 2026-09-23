@@ -52,6 +52,8 @@ def render(store: str, offers: Iterable[Offer], on: date = None) -> str:
             continue
         if o.limit:
             attrs.append(f'limit="{o.limit}"')
+        if o.expires:
+            attrs.append(f'expires="{o.expires}"')
         note = safe_note(o.note or o.title)
         if note:
             attrs.append(f'note="{note}"')

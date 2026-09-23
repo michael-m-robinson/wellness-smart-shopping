@@ -111,6 +111,8 @@ struct ListOptions {
     let saleItemIDs: Set<String>
     /// item id -> store the imported offer came from (for redeem notices).
     var saleSources: [String: String] = [:]
+    /// item id -> the last day its deal is good for (printed on the list).
+    var saleExpiry: [String: Date] = [:]
 }
 
 final class PriceBook {
@@ -220,6 +222,31 @@ struct DetectedCoupon {
     let maximumUses: Int
     let sourceURL: String
     let requiresAccountClip: Bool
+    /// Last day the deal is good for (from the deal file's expires="YYYY-MM-DD").
+    var expires: Date? = nil
+}
+
+/// "2026-09-26" -> that day. The deal is good through the end of it.
+func dealDate(_ text: String?) -> Date? {
+    guard let text, !text.isEmpty else { return nil }
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US_POSIX")
+    f.dateFormat = "yyyy-MM-dd"
+    return f.date(from: text)
+}
+
+/// True while a deal can still be used: through the whole of its last day.
+func dealIsActive(_ expires: Date?, now: Date = Date()) -> Bool {
+    guard let expires else { return true }
+    return Calendar.current.startOfDay(for: now) <= Calendar.current.startOfDay(for: expires)
+}
+
+/// "Fri, Sep 26"
+func dealEndText(_ date: Date) -> String {
+    let f = DateFormatter()
+    f.locale = Locale(identifier: "en_US")
+    f.dateFormat = "EEE, MMM d"
+    return f.string(from: date)
 }
 
 
@@ -371,7 +398,8 @@ func parseSalesXML(_ data: Data, items: [ShoppingItem]) -> [DetectedCoupon] {
         let offer = DetectedCoupon(
             itemID: item.id, store: store, matchedTitle: title,
             savingsPerPackage: min(250, savings), maximumUses: limit,
-            sourceURL: "imported-xml", requiresAccountClip: false
+            sourceURL: "imported-xml", requiresAccountClip: false,
+            expires: dealDate(attr("expires"))
         )
         if savings > (bestByItem[item.id]?.savingsPerPackage ?? 0) { bestByItem[item.id] = offer }
     }
@@ -1627,13 +1655,22 @@ final class PDFWriter {
             let favoriteMark = favorites.contains(item.id) ? "★ " : ""
             let verifiedSale = options.prioritizeSales && options.saleItemIDs.contains(item.id) && row.couponSavings > 0
             let saleMark = verifiedSale ? "SALE • " : ""
-            let offerDetail = row.couponSavings > 0 ? " | regular \(money(row.grossLineTotal)) | offer -\(money(row.couponSavings))" : ""
             let offerStore = options.saleSources[item.id] ?? item.store
             let mustLoad = verifiedSale && (redeemNotice(for: offerStore)?.mustAct ?? false)
             let sourceDetail = verifiedSale
                 ? "\(item.store) / \(item.aisle) • \(mustLoad ? "LOAD COUPON FIRST" : "verified offer")"
                 : "\(item.store) / \(item.aisle) • estimate"
-            drawRow(name: saleMark + favoriteMark + item.name, detail: "\(row.quantity) x \(item.package)\(offerDetail)", source: sourceDetail, price: money(row.lineTotal))
+            // A deal shows both prices and the day it ends, under the name and
+            // again in the price column.
+            var name = saleMark + favoriteMark + item.name
+            var price = money(row.lineTotal)
+            if row.couponSavings > 0 {
+                var deal = "Sale \(money(row.lineTotal)) · regular \(money(row.grossLineTotal))"
+                if let ends = options.saleExpiry[item.id] { deal += " · deal ends \(dealEndText(ends))" }
+                name += "\n" + deal
+                price = "\(money(row.lineTotal))\nwas \(money(row.grossLineTotal))"
+            }
+            drawRow(name: name, detail: "\(row.quantity) x \(item.package)", source: sourceDetail, price: price)
         }
 
         drawClosingImage()
@@ -1841,6 +1878,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var couponValues: [String: Double] = [:]
     var couponLimits: [String: Int] = [:]
     var couponSources: [String: String] = [:]
+    /// item id -> the last day its deal is good for.
+    var couponExpiry: [String: Date] = [:]
+
+    /// The deals still good today. Plans and prices only ever use these, so an
+    /// ended coupon can't make the estimate look cheaper than the register.
+    var activeCouponValues: [String: Double] {
+        couponValues.filter { dealIsActive(couponExpiry[$0.key]) }
+    }
     var controlPanelProcess: Process?
     weak var controlPanelButton: NSButton?
     weak var controlPanelSpinner: NSProgressIndicator?
@@ -1905,6 +1950,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         couponValues = (UserDefaults.standard.dictionary(forKey: "couponSavingsByItem") ?? [:]).compactMapValues { ($0 as? NSNumber)?.doubleValue }
         couponLimits = (UserDefaults.standard.dictionary(forKey: "couponLimitsByItem") ?? [:]).compactMapValues { ($0 as? NSNumber)?.intValue }
         couponSources = UserDefaults.standard.dictionary(forKey: "couponSourcesByItem") as? [String: String] ?? [:]
+        couponExpiry = (UserDefaults.standard.dictionary(forKey: "couponExpiryByItem") ?? [:]).compactMapValues { $0 as? Date }
         prioritizeSales.state = (UserDefaults.standard.object(forKey: "prioritizeVerifiedSales") as? Bool ?? true) ? .on : .off
         makeMenu()
         buildWindow()
@@ -2121,6 +2167,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         // deals come from whichever store you scanned.
         Set(couponSources.keys.filter { id in
             (couponValues[id] ?? 0) > 0 && !(couponSources[id] ?? "").isEmpty
+                && dealIsActive(couponExpiry[id])
         })
     }
 
@@ -2339,6 +2386,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         UserDefaults.standard.set(couponValues, forKey: "couponSavingsByItem")
         UserDefaults.standard.set(couponLimits, forKey: "couponLimitsByItem")
         UserDefaults.standard.set(couponSources, forKey: "couponSourcesByItem")
+        UserDefaults.standard.set(couponExpiry, forKey: "couponExpiryByItem")
         updateCouponsButton()
     }
 
@@ -2352,6 +2400,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             couponValues.removeValue(forKey: id)
             couponLimits.removeValue(forKey: id)
             couponSources.removeValue(forKey: id)
+            couponExpiry.removeValue(forKey: id)
         }
         for match in matches {
             guard match.savingsPerPackage > 0 else { continue }
@@ -2362,6 +2411,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 couponValues[match.itemID] = min(250, match.savingsPerPackage)
                 couponLimits[match.itemID] = max(1, match.maximumUses)
                 couponSources[match.itemID] = match.store
+                if let ends = match.expires { couponExpiry[match.itemID] = ends }
+                else { couponExpiry.removeValue(forKey: match.itemID) }
                 applied.append(match)
             } else {
                 keptBetter.append(match)
@@ -2447,7 +2498,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         var boxes: [(NSButton, DetectedCoupon)] = []
         for (index, offer) in sorted.enumerated() {
             let name = catalog.first { $0.id == offer.itemID }?.name ?? offer.matchedTitle
-            let box = NSButton(checkboxWithTitle: "\(name) · est. save \(money(offer.savingsPerPackage))/package", target: nil, action: nil)
+            let ends = offer.expires.map { " · ends \(dealEndText($0))" } ?? ""
+            let box = NSButton(checkboxWithTitle: "\(name) · est. save \(money(offer.savingsPerPackage))/package\(ends)", target: nil, action: nil)
             box.state = .on
             box.frame = NSRect(x: 0, y: listHeight - (index + 1) * rowHeight, width: width, height: rowHeight)
             container.addSubview(box)
@@ -2794,6 +2846,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         couponValues.removeAll()
         couponLimits.removeAll()
         couponSources.removeAll()
+        couponExpiry.removeAll()
+        UserDefaults.standard.removeObject(forKey: "couponExpiryByItem")
         UserDefaults.standard.removeObject(forKey: "couponSavingsByItem")
         UserDefaults.standard.removeObject(forKey: "couponLimitsByItem")
         UserDefaults.standard.removeObject(forKey: "couponSourcesByItem")
@@ -2873,7 +2927,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         }
         let options = ListOptions(recipient: "Home", days: days, people: people, budgetMin: min(enteredMin, enteredMax), budgetMax: max(enteredMin, enteredMax), groupByStore: true, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: verifiedSaleItemIDs())
         let shoppable = shoppableCatalog(catalog, dealStores: couponSources, enabledStores: stores)
-        let plan = makeShoppingPlan(options: options, items: shoppable, prices: priceBook, favorites: favoriteIDs, coupons: couponValues, couponLimits: couponLimits)
+        let plan = makeShoppingPlan(options: options, items: shoppable, prices: priceBook, favorites: favoriteIDs, coupons: activeCouponValues, couponLimits: couponLimits)
         let lifestyle = recipeDiet.titleOfSelectedItem ?? "Mediterranean"
         // Search for recipes that use this week's on-sale picks first.
         let onSale = options.prioritizeSales ? options.saleItemIDs : []
@@ -3099,7 +3153,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             return
         }
         let saleIDs = verifiedSaleItemIDs()
-        let options = ListOptions(recipient: recipient, days: days, people: people, budgetMin: budgetMin, budgetMax: budgetMax, groupByStore: grouping.indexOfSelectedItem == 0, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: saleIDs, saleSources: couponSources)
+        let options = ListOptions(recipient: recipient, days: days, people: people, budgetMin: budgetMin, budgetMax: budgetMax, groupByStore: grouping.indexOfSelectedItem == 0, enabledMeals: meals, enabledStores: stores, nutritionGoal: goal, heightInches: profile.heightInches, weightPounds: profile.weightPounds, prioritizeSales: prioritizeSales.state == .on, saleItemIDs: saleIDs, saleSources: couponSources, saleExpiry: couponExpiry)
         // This week's on-sale pick in each category the app tracks: recipes are
         // chosen with them in mind (the nutrition goal still ranks first), and
         // each item is listed at the store that has its deal.
@@ -3112,13 +3166,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         let coverage = recipeShoppingCoverage(recipes: selectedRecipes, options: options, baseItems: shoppable)
         var plan = makeShoppingPlan(
             options: options, items: coverage.items, prices: priceBook, favorites: favoriteIDs,
-            coupons: couponValues, couponLimits: couponLimits, requiredItemIDs: coverage.requiredItemIDs
+            coupons: activeCouponValues, couponLimits: couponLimits, requiredItemIDs: coverage.requiredItemIDs
         )
         var appliedSwaps: [SaleSwap] = []
         if options.prioritizeSales {
             let swaps = proposeSaleSwaps(
                 plan: plan, options: options, items: coverage.items, prices: priceBook,
-                favorites: favoriteIDs, coupons: couponValues, couponLimits: couponLimits,
+                favorites: favoriteIDs, coupons: activeCouponValues, couponLimits: couponLimits,
                 requiredItemIDs: coverage.requiredItemIDs
             )
             // In each category, the on-sale option replaces the regular one.
@@ -3129,7 +3183,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                     appliedSwaps = chosen
                     plan = makeShoppingPlan(
                         options: options, items: coverage.items, prices: priceBook, favorites: favoriteIDs,
-                        coupons: couponValues, couponLimits: couponLimits,
+                        coupons: activeCouponValues, couponLimits: couponLimits,
                         requiredItemIDs: coverage.requiredItemIDs.union(chosen.map { $0.toID }),
                         excludedItemIDs: Set(chosen.map { $0.fromID })
                     )
@@ -3168,6 +3222,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             UserDefaults.standard.set(url.path, forKey: lastShoppingPDFPathKey)
             printButton.isEnabled = true
             let savings = plan.couponSavings > 0 ? " Coupon savings applied: \(money(plan.couponSavings))." : ""
+            let endedCount = couponValues.keys.filter { !dealIsActive(couponExpiry[$0]) }.count
+            let ended = endedCount == 0 ? "" : " \(endedCount) deal\(endedCount == 1 ? " has" : "s have") ended and \(endedCount == 1 ? "was" : "were") left out - scan again for this week's."
             let saleMessage = options.prioritizeSales
                 ? " Deals covered \(plan.prioritizedSaleItems) item\(plan.prioritizedSaleItems == 1 ? "" : "s") the list already needed."
                 : ""
@@ -3180,7 +3236,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
                 let picks = appliedSwaps.map { "\($0.toName) for \($0.fromName)" }.joined(separator: ", ")
                 swapMessage = " On sale this week, so we picked: \(picks) (about \(money(swapped)) saved)."
             }
-            status.stringValue = "Created and remembered \(url.lastPathComponent) in \(url.deletingLastPathComponent().lastPathComponent). Recipes were finalized first, and every non-water recipe ingredient is included in the shopping list.\(extras) All filenames stay paired.\(savings)\(saleMessage)\(swapMessage)"
+            status.stringValue = "Created and remembered \(url.lastPathComponent) in \(url.deletingLastPathComponent().lastPathComponent). Recipes were finalized first, and every non-water recipe ingredient is included in the shopping list.\(extras) All filenames stay paired.\(savings)\(ended)\(saleMessage)\(swapMessage)"
             NSWorkspace.shared.open(url)
             NSWorkspace.shared.open(recipeURL)
             NSWorkspace.shared.open(dailyMealsURL)
@@ -3350,7 +3406,8 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
             groupByStore: options.groupByStore, enabledMeals: options.enabledMeals,
             enabledStores: options.enabledStores, nutritionGoal: options.nutritionGoal,
             heightInches: options.heightInches, weightPounds: options.weightPounds,
-            prioritizeSales: true, saleItemIDs: Set(["beef"])
+            prioritizeSales: true, saleItemIDs: Set(["beef"]),
+            saleExpiry: ["beef": dealDate("2026-09-26")!]
         )
         let saleRecipes = recipesForPlan(apiRecipes: [], days: saleOptions.days, lifestyle: "Mediterranean", options: saleOptions)
         let bannedIngredientFixtures = [
@@ -3557,6 +3614,12 @@ if CommandLine.arguments.count >= 3 && CommandLine.arguments[1] == "--self-test"
               canonicalStore("Stew Leonards") == "Stew Leonard's",
               AppDelegate.listed(["Costco", "ShopRite", "Stew Leonard's"]) == "Costco, ShopRite and Stew Leonard's" else {
             throw NSError(domain: "SelfTest", code: 21, userInfo: [NSLocalizedDescriptionKey: "On-sale picks or store handling failed."])
+        }
+        let today = Date()
+        guard dealIsActive(nil), dealIsActive(today),
+              !dealIsActive(Calendar.current.date(byAdding: .day, value: -1, to: today)!),
+              dealDate("2026-09-26").map(dealEndText) == "Sat, Sep 26" else {
+            throw NSError(domain: "SelfTest", code: 22, userInfo: [NSLocalizedDescriptionKey: "Deal end dates failed."])
         }
         fputs("SELF_TEST_SALE_PICKS_OK\n", stderr)
         try RecipePDFWriter().write(to: recipeTarget, options: saleOptions, recipes: testRecipes, schedule: testSchedule, lifestyle: "Mediterranean", nutritionGoal: saleOptions.nutritionGoal, shoppingListFilename: target.lastPathComponent)

@@ -13,6 +13,7 @@
  *   price     [data-testid="Text_prices_and_percentages_prices"]        "$15.99"
  *             [data-testid="Text_prices_and_percentages_prepend_text"]  "Save"
  *             [data-testid="Text_prices_and_percentages_append_text"]   "After $6 OFF"
+ *   ends      the booklet's "Valid 9/21/26 - 10/18/26" -> 10/18/26 for every card
  *   A few cards show their price only in the image; they are skipped and
  *   listed in the report. Most departments are not food (Apparel, Pharmacy,
  *   Electronics ...); only Grocery is kept -- "Banana Republic ... Pant" once
@@ -26,6 +27,18 @@
   const MARKER = /^(?:(?:warehouse|online)(?:\s*(?:&|and)\s*(?:warehouse|online))?(?:\s+only)?|&|\$|\.|\d+|%|save|buy online)$/i;
   const P = '[data-testid="Text_prices_and_percentages_';
   const FOOD_DEPARTMENTS = /^grocery$/i;
+
+  // The booklet's end date (read once per page).
+  const validUntil = new WeakMap();
+  function bookletEnd(doc) {
+    if (!doc || !doc.body) return "";
+    if (!validUntil.has(doc)) {
+      const m = H.clean(doc.body.innerText || "").match(/Valid\s+([\d\/]+\s*-\s*[\d\/]+)/i);
+      const dates = m ? H.dates(m[1]) : [];
+      validUntil.set(doc, dates[dates.length - 1] || "");
+    }
+    return validUntil.get(doc);
+  }
 
   // One card's price, in words the panel's parser already knows:
   //   Save $6.80              -> "Save $6.80"
@@ -46,7 +59,7 @@
   const site = WSS.defineSite({
     key: "costco",
     name: "Costco",
-    version: 2,
+    version: 3,
     verified: "2026-09-21",
     startUrl: "https://www.costco.com/o/-/warehouse-savings",
     readableOn: "costco\\.com/o/-/warehouse-savings",
@@ -71,6 +84,7 @@
         prepend: H.text(el, P + 'prepend_text"]'),
         price: H.text(el, P + 'prices"]'),
         append: H.text(el, P + 'append_text"]'),
+        ends: bookletEnd(el.ownerDocument),
       };
     },
     // Food only. Department names come from the page ("coupon-set-Grocery").
@@ -79,7 +93,7 @@
       const price = priceField(r);
       if (!r.name || !price) return null;
       const name = r.size ? `${r.name}, ${r.size}` : r.name;
-      return H.join(H.tidy(name), price, H.limit(r.limitText));
+      return H.join(H.tidy(name), price, H.limit(r.limitText), r.ends);
     },
 
     // A handful of cards carry the price only in their picture.

@@ -33,6 +33,37 @@ test("every site declares what the engine and the background need", () => {
   }
 });
 
+test("helpers: end dates, with and without a year", () => {
+  const now = new Date(2026, 8, 21);
+  assert.deepEqual(H.dates("Expires: 09/26/2026 - 5 days left", now), ["2026-09-26"]);
+  assert.deepEqual(H.dates("Weekly Specials 9/16-9/22", now), ["2026-09-16", "2026-09-22"]);
+  assert.deepEqual(H.dates("Valid 9/21/26 - 10/18/26", now), ["2026-09-21", "2026-10-18"]);
+  assert.deepEqual(H.dates("12/30-1/5", new Date(2026, 11, 30)), ["2026-12-30", "2027-01-05"]);
+  assert.deepEqual(H.dates("no dates here"), []);
+  assert.equal(H.join("Eggs", "$1.00 off", null, "2026-09-26"), "Eggs | $1.00 off | no limit | ends 2026-09-26");
+  assert.equal(H.join("Eggs", "$1.00 off", "Limit 4"), "Eggs | $1.00 off | Limit 4");
+});
+
+test("each store's lines say when the deal ends", () => {
+  const coupon = card({ ".coupon-savings": ["Save $1.00"],
+                        ".coupon-desc": ["Save $1.00 on Nature’s Own Bread When you Buy ONE (1) Nature’s Own Bread"],
+                        ".coupon-badge": ["Limit 4"],
+                        ".coupon-expiration-text": ["Expires: 09/26/2026 - 5 days left"] });
+  assert.equal(lineOf(shoprite, coupon), "Nature’s Own Bread | $1.00 off | Limit 4 | ends 2026-09-26");
+
+  const stewsPage = { querySelector: (sel) => (sel === "h1" ? leaf("Weekly Specials 9/16-9/22") : null) };
+  const special = card({ ".screen-reader-only": ["Current price: $2.49 per pound", "Original Price: $3.99 per pound"],
+                         "img[alt]": [leaf("", { alt: "Boneless Chicken Breast" })] });
+  special.ownerDocument = stewsPage;
+  assert.match(lineOf(stews, special), /^Boneless Chicken Breast \| \$2\.49\/lb, was \$3\.99\/lb \| no limit \| ends \d{4}-09-22$/);
+
+  const costcoPage = { body: { innerText: "Pricing may vary | Valid 9/21/26 - 10/18/26 Apparel" } };
+  const offer = costcoCard(["Nescafé Coffee", "14 oz", "Item 1244454", "Limit 5."],
+                           { price: "$15.99", append: "After $6 OFF" });
+  offer.ownerDocument = costcoPage;
+  assert.equal(lineOf(costco, offer), "Nescafé Coffee, 14 oz | $15.99 after $6.00 off | Limit 5 | ends 2026-10-18");
+});
+
 // ---------------------------------------------------------------- ShopRite
 test("shoprite: names, quantities and terms", () => {
   const cases = [

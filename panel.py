@@ -330,7 +330,8 @@ def build_for(store) -> dict:
             continue
         seen.add(o.title)
         listed.append({"title": o.title, "savings": o.savings,
-                       "sale_price": o.sale_price, "limit": o.limit})
+                       "sale_price": o.sale_price, "limit": o.limit,
+                       "expires": o.expires})
     return {"found": True, "count": len(offers), "xml": xml_path,
             "offers": listed, "mtime": os.path.getmtime(store.harvest_path)}
 
@@ -1600,7 +1601,15 @@ function showRedeem(r, count, offers) {{
       const detail = document.createElement("span");
       const money = o.savings != null ? "Save $" + Number(o.savings).toFixed(2)
                   : o.sale_price != null ? "$" + Number(o.sale_price).toFixed(2) : "";
-      detail.textContent = [money, o.limit ? "limit " + o.limit : ""].filter(Boolean).join(" \\u00b7 ");
+      // "2026-09-26" -> "ends Sat, Sep 26": load it before then.
+      let ends = "";
+      if (o.expires) {{
+        const [y, m, dd] = o.expires.split("-").map(Number);
+        ends = "ends " + new Date(y, m - 1, dd).toLocaleDateString("en-US",
+          {{weekday: "short", month: "short", day: "numeric"}});
+      }}
+      detail.textContent = [money, o.limit ? "limit " + o.limit : "", ends]
+        .filter(Boolean).join(" \\u00b7 ");
       what.append(name, detail);
       const copy = document.createElement("button");
       copy.type = "button";
